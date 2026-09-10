@@ -41,7 +41,7 @@ age_experiment_row = function(fit, cc, v){
   ratio = colMeans(do.call(rbind, lapply(seq_along(fit$seasons), function(k){ y = fit$y[[k]]; m = fit$mu_det[[k]]; ok = is.finite(y)
     vapply(seq_len(ncol(y)), function(a) sum(y[ok[, a], a]) / sum(m[ok[, a], a]), numeric(1)) })), na.rm = TRUE)
   att = colMeans(fit$attack)
-  data.frame(country = cc, variant = v, n_seasons = length(fit$seasons), negll_stage1 = fit$stage1$negll, negll_ekf = fit$negll,
+  data.frame(country = cc, variant = v, n_seasons = length(fit$seasons), negll_stage1 = if (is.null(fit$stage1)) NA_real_ else fit$stage1$negll, negll_ekf = fit$negll,
              phi = fit$params$phi, S0 = fit$params$S0,
              c_young_rel = fit$params$c_age[1] / fit$params$c_age[2], c_elderly_rel = fit$params$c_age[3] / fit$params$c_age[2],
              se_log2c_young = unname(fit$se["log2c_young"])[1], se_log2c_elderly = unname(fit$se["log2c_elderly"])[1],
@@ -71,6 +71,16 @@ run_age_experiment = function(countries = age_experiment_countries, variants = n
       for (w in warms){
         fw = tryCatch(fit_comp_model(cd, s, R0_free = TRUE, verbose = FALSE, start = w), error = function(e){ cat("FAIL", cc, v, ":", conditionMessage(e), "\n"); NULL })
         if (!is.null(fw) && (is.null(fit) || fw$negll < fit$negll)) fit = fw
+      }
+      # a nested variant can never be worse than its parent: the parent's EKF optimum padded with zeros
+      # IS a valid point of the larger model. Polish from there (EKF stage only) and keep the best --
+      # this closes the ~4-nat optimiser noise that otherwise shows D 'losing' to B.
+      if (v != "A_none"){
+        s_polish = s; s_polish$two_stage = FALSE
+        for (pv in parents[parents != v]){ fp = file.path(dir, sprintf("fit_%s_%s.rds", cc, pv)); if (!file.exists(fp)) next
+          fw = tryCatch(fit_comp_model(cd, s_polish, R0_free = TRUE, n_starts = 1, verbose = FALSE, start = readRDS(fp)$theta), error = function(e) NULL)
+          if (!is.null(fw) && (is.null(fit) || fw$negll < fit$negll)){ fw$stage1 = fit$stage1; fit = fw }   # keep a stage-1 record for the figures
+        }
       }
       if (is.null(fit)) next
       fit$Cn = cd$Cn; saveRDS(fit, file.path(dir, sprintf("fit_%s_%s.rds", cc, v)))
