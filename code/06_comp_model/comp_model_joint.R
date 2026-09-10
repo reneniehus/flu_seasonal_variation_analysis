@@ -14,6 +14,7 @@
 # gradient over ~30 parameters ~6 s, a fit ~30-60 min. For all 25 panel countries (~130 parameters)
 # expect hours; analytical gradients would be the next step.
 
+# layout: log_R0[K] | logit_S0[Cc] | log_c[Cc] | log_b[Cc] | log_phi[Cc] | log_q | [log_I0 per country-season, in cds order]
 cm_joint_pack = function(fits, seasons_all, settings){
   K = length(seasons_all); Cc = length(fits)
   R0_by_season = sapply(seasons_all, function(s) mean(vapply(fits, function(f){ i = match(s, f$seasons); if (is.na(i)) NA_real_ else f$params$R0[i] }, numeric(1)), na.rm = TRUE))
@@ -23,40 +24,48 @@ cm_joint_pack = function(fits, seasons_all, settings){
             vapply(fits, function(f) log(f$params$c), numeric(1)),
             vapply(fits, function(f) log(f$params$b), numeric(1)),
             vapply(fits, function(f) log(f$params$phi), numeric(1)),
-            log(mean(vapply(fits, function(f) f$params$q, numeric(1)))))
+            log(mean(vapply(fits, function(f) f$params$q, numeric(1)))),
+            if (isTRUE(settings$I0_by_season)) unlist(lapply(fits, function(f) log(f$params$I0))))
   names(theta) = c(paste0("log_R0_", seasons_all), paste0("logit_S0_", names(fits)), paste0("log_c_", names(fits)),
-                   paste0("log_b_", names(fits)), paste0("log_phi_", names(fits)), "log_q")
+                   paste0("log_b_", names(fits)), paste0("log_phi_", names(fits)), "log_q",
+                   if (isTRUE(settings$I0_by_season)) unlist(lapply(names(fits), function(cc) paste0("log_I0_", cc, "_", fits[[cc]]$seasons))))
   theta
 }
 
-cm_joint_unpack = function(theta, K, Cc){
-  i = 0
-  list(R0 = exp(theta[i + 1:K]), S0 = plogis(theta[K + 1:Cc]), c = exp(theta[K + Cc + 1:Cc]),
-       b = exp(theta[K + 2*Cc + 1:Cc]), phi = exp(theta[K + 3*Cc + 1:Cc]), q = exp(theta[K + 4*Cc + 1]))
+cm_joint_unpack = function(theta, K, Cc, n_cs = NULL, settings = NULL){
+  out = list(R0 = exp(theta[1:K]), S0 = plogis(theta[K + 1:Cc]), c = exp(theta[K + Cc + 1:Cc]),
+             b = exp(theta[K + 2*Cc + 1:Cc]), phi = exp(theta[K + 3*Cc + 1:Cc]), q = exp(theta[K + 4*Cc + 1]))
+  if (!is.null(settings) && isTRUE(settings$I0_by_season)){               # per country-season seeds, split by country
+    v = exp(theta[K + 4*Cc + 1 + seq_len(sum(n_cs))]); out$I0 = split(v, rep(seq_len(Cc), n_cs))
+  } else out$I0 = lapply(n_cs, function(n) rep(settings$I0_fraction, n))
+  out
 }
 
-cm_joint_logprior = function(theta, K, Cc, settings){
-  sum(dnorm(theta[1:K], log(settings$R0_reference), settings$prior_logR0_sd, log = TRUE)) +
+cm_joint_logprior = function(theta, K, Cc, settings, n_cs = NULL){
+  lp = sum(dnorm(theta[1:K], log(settings$R0_reference), settings$prior_logR0_sd, log = TRUE)) +
   sum(dnorm(theta[K + 1:Cc], settings$prior_logitS0["mean"], settings$prior_logitS0["sd"], log = TRUE)) +
   sum(dnorm(theta[K + 3*Cc + 1:Cc], settings$prior_logphi["mean"], settings$prior_logphi["sd"], log = TRUE)) +
   dnorm(theta[K + 4*Cc + 1], settings$prior_logq["mean"], settings$prior_logq["sd"], log = TRUE)
+  if (isTRUE(settings$I0_by_season)) lp = lp + sum(dnorm(theta[K + 4*Cc + 1 + seq_len(sum(n_cs))], log(settings$I0_fraction), settings$prior_logI0_sd, log = TRUE))
+  lp
 }
 
 # cds: named list of build_comp_data() outputs; seasons_all: the union of seasons (defines R0_s slots)
 cm_joint_negll = function(theta, cds, fixed, seasons_all, settings, engine = "cpp", cores = 1, return_fit = FALSE){
-  K = length(seasons_all); Cc = length(cds); p = cm_joint_unpack(theta, K, Cc)
+  K = length(seasons_all); Cc = length(cds); n_cs = vapply(cds, function(cd) length(cd$seasons), integer(1))
+  p = cm_joint_unpack(theta, K, Cc, n_cs, settings)
   one_country = function(i){
     cd = cds[[i]]; f = fixed[[i]]; ll = 0; filt = vector("list", length(cd$seasons))
     for (s in seq_along(cd$seasons)){
       k = match(cd$seasons[s], seasons_all)
-      e = cm_ekf_season_engine(cd$y[[s]], f, p$S0[i], p$R0[k], p$c[i], p$b[i], p$phi[i], p$q, cd$vax_day, cd$vax_frac[[s]], engine = engine)
+      e = cm_ekf_season_engine(cd$y[[s]], f, p$S0[i], p$R0[k], p$c[i], p$b[i], p$phi[i], p$q, cd$vax_day, cd$vax_frac[[s]], engine = engine, I0 = p$I0[[i]][s])
       ll = ll + e$loglik; if (return_fit) filt[[s]] = e
     }
     list(ll = ll, filt = filt)
   }
   res = if (cores > 1) parallel::mclapply(seq_len(Cc), one_country, mc.cores = cores) else lapply(seq_len(Cc), one_country)
   ll = sum(vapply(res, function(r) if (inherits(r, "try-error") || is.null(r)) -1e10 else r$ll, numeric(1)))
-  lp = cm_joint_logprior(theta, K, Cc, settings)
+  lp = cm_joint_logprior(theta, K, Cc, settings, n_cs)
   if (return_fit) return(list(negll = -(ll + lp), loglik = ll, params = p, filt = lapply(res, `[[`, "filt")))
   if (!is.finite(ll + lp)) return(1e10)
   -(ll + lp)

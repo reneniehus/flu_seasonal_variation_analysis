@@ -25,13 +25,24 @@ test_that("R and C++ engines agree to 1e-10 on synthetic data (pulse, missing we
   y[c(3, 17, 30), 2] <- NA; y[5, ] <- NA                                     # missing cells and a missing week
   for (par in list(list(S0 = 0.72, R0 = 1.55, c = 0.09, b = 2.5, phi = 20, q = 0.05),
                    list(S0 = 0.85, R0 = 1.40, c = 0.20, b = 0.5, phi = 5,  q = 0.6),
-                   list(S0 = 0.60, R0 = 1.70, c = 0.02, b = 8.0, phi = 60, q = 1e-4))){
+                   list(S0 = 0.60, R0 = 1.70, c = 0.02, b = 8.0, phi = 60, q = 1e-4),
+                   list(S0 = 0.75, R0 = 1.50, c = c(0.05, 0.08, 0.16), b = 3, phi = 15, q = 0.1))){   # age-specific reporting
     r <- cm_ekf_season(y, f, par$S0, par$R0, par$c, par$b, par$phi, par$q, 62, c(0, 0, 0.5))
     k <- cm_ekf_season_engine(y, f, par$S0, par$R0, par$c, par$b, par$phi, par$q, 62, c(0, 0, 0.5), engine = "cpp")
     expect_lt(abs(r$loglik - k$loglik) / abs(r$loglik), 1e-10)
     expect_lt(rel(k$mu_pred, r$mu_pred), 1e-10)
     expect_lt(rel(k$I, r$I), 1e-10)
     expect_lt(rel(k$S, r$S), 1e-10)
+  }
+})
+
+test_that("the C++ deterministic simulator matches the R reference (incidence, end state, attack rates)", {
+  for (par in list(list(S0 = 0.8, R0 = 1.5, I0 = 1e-5), list(S0 = 0.6, R0 = 1.7, I0 = 3e-7))){
+    r <- cm_simulate_season(f, par$S0, par$R0, 40, 62, c(0, 0, 0.5), I0 = par$I0)
+    k <- cm_simulate_season_engine(f, par$S0, par$R0, 40, 62, c(0, 0, 0.5), I0 = par$I0, engine = "cpp")
+    expect_lt(rel(k$inc, r$inc), 1e-10)
+    expect_lt(rel(as.numeric(k$x_end), r$x_end), 1e-10)
+    expect_lt(rel(as.numeric(k$attack), r$attack), 1e-10)
   }
 })
 

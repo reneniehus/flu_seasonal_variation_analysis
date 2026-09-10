@@ -122,7 +122,7 @@ static void cm_week(std::vector<double>& x, const Fixed& f, double beta, int day
 // [[Rcpp::export]]
 List cm_ekf_season_cpp(NumericMatrix y, NumericMatrix Cn, NumericVector N,
                        double gamma, double ve_inf, double ve_spread, double ve_ili, double I0, double p0, double rate_per,
-                       double S0, double R0, double c, double b, double phi, double q,
+                       double S0, double R0, NumericVector c, double b, double phi, double q,
                        int vax_day, NumericVector vax_frac){
   Fixed f; f.A = Cn.nrow(); f.n = 5 * f.A;
   f.Cn.assign(f.A * f.A, 0.0);
@@ -137,7 +137,7 @@ List cm_ekf_season_cpp(NumericMatrix y, NumericMatrix Cn, NumericVector N,
   for (int a = 0; a < A; ++a){ x[a] = S0; x[A + a] = I0; }
   for (int a = 0; a < A; ++a){ P[a*n + a] = (p0*S0)*(p0*S0); P[(A+a)*n + (A+a)] = (p0*I0)*(p0*I0); }
   std::vector<double> cN(A), b_cnt(A);
-  for (int a = 0; a < A; ++a){ cN[a] = c * f.N[a]; b_cnt[a] = b * f.N[a] / rate_per; }
+  for (int a = 0; a < A; ++a){ cN[a] = c[a] * f.N[a]; b_cnt[a] = b * f.N[a] / rate_per; }
 
   NumericMatrix mu_pred(T, A), I_filt(T, A), S_filt(T, A);
   std::fill(mu_pred.begin(), mu_pred.end(), NA_REAL); std::fill(I_filt.begin(), I_filt.end(), NA_REAL); std::fill(S_filt.begin(), S_filt.end(), NA_REAL);
@@ -216,4 +216,30 @@ List cm_ekf_season_cpp(NumericMatrix y, NumericMatrix Cn, NumericVector N,
     for (int a = 0; a < A; ++a){ I_filt(t, a) = x[A + a] + x[3*A + a]; S_filt(t, a) = x[a] + x[2*A + a]; }
   }
   return List::create(_["loglik"] = ll, _["mu_pred"] = mu_pred, _["I"] = I_filt, _["S"] = S_filt);
+}
+
+// [[Rcpp::export]]
+List cm_simulate_season_cpp(int n_weeks, NumericMatrix Cn, NumericVector N,
+                            double gamma, double ve_inf, double ve_spread, double ve_ili, double I0,
+                            double S0, double R0, int vax_day, NumericVector vax_frac){
+  // deterministic season (no filter): the weekly observation-relevant incidence C per age group,
+  // the end state and the per-age attack rate -- mirrors cm_simulate_season() in the R reference
+  Fixed f; f.A = Cn.nrow(); f.n = 5 * f.A;
+  f.Cn.assign(f.A * f.A, 0.0);
+  for (int a = 0; a < f.A; ++a) for (int j = 0; j < f.A; ++j) f.Cn[a*f.A + j] = Cn(a, j);
+  f.N.assign(N.begin(), N.end());
+  f.gamma = gamma; f.ve_inf = ve_inf; f.ve_spread = ve_spread; f.ve_ili = ve_ili; f.I0 = I0; f.p0 = 0.0; f.rate_per = 1.0;
+  const int A = f.A, n = f.n; const double beta = R0 * gamma;
+  std::vector<double> vf(vax_frac.begin(), vax_frac.end());
+  std::vector<double> x(n, 0.0), Jdummy;
+  for (int a = 0; a < A; ++a){ x[a] = S0; x[A + a] = I0; }
+  NumericMatrix inc(n_weeks, A);
+  for (int t = 0; t < n_weeks; ++t){
+    cm_week(x, f, beta, 7*t, vax_day, vf.data(), false, Jdummy);
+    for (int a = 0; a < A; ++a) inc(t, a) = x[4*A + a];
+  }
+  NumericVector x_end(n), attack(A);
+  for (int k = 0; k < n; ++k) x_end[k] = x[k];
+  for (int a = 0; a < A; ++a) attack[a] = S0 - x[a] - x[2*A + a];
+  return List::create(_["inc"] = inc, _["x_end"] = x_end, _["attack"] = attack);
 }

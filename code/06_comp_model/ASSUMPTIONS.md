@@ -122,10 +122,18 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   initial simplex for all seasons, ages and -- per fit -- one country; this design keeps the shared
   initial state per country and adds the season factor on transmission instead of the disabled
   `i_season`/`r_season` initial-state deviations.
-- E3 `[proposal]` Seed: `I0 = 1e-5` of each age group, fixed, planted on day 1 of the season (as the
-  susceptibility methods do; `decisions.md`). With I0 and the seed day fixed, onset timing is carried
-  entirely by the growth rate, which is what identifies `S0`. (The Stan model fitted a shared initial
-  I fraction instead; prior `logit(I0) ~ N(logit 3e-6, 5)` in its comments.)
+- E3 `[proposal, revised 2026-09-10 on evidence]` Seed: `I0_s = 1e-5 * exp(delta_s)` of each age group
+  on day 1 of the season, with a PER-SEASON deviation `delta_s ~ N(0, 2.5)` (settings `I0_by_season`,
+  `prior_logI0_sd`). Why not the fixed seed first agreed: with `S0_c` shared across seasons (E2) the
+  fixed 1 August seed left the model no handle on WHEN a season arrives, and the first Danish fit
+  showed it -- the deterministic SIR peaked around week 15-22 in every season against observed peaks
+  at week 30-35, and the filter could only follow the data by abandoning the SIR (q = 0.32, phi = 1).
+  The observed rise steepness matched the fitted growth rate, so the failure was timing, not
+  transmission. A seed k times smaller arrives log(k)/r days later at growth rate r and leaves
+  r = gamma*(R0_s*S0_c - 1), hence the identification of R0_s and S0_c, untouched -- this is the
+  smooth form of the Stan model's disabled `i_season` term (prior `logit(I0) ~ N(logit 3e-6, 5)` in its
+  comments). The single-population susceptibility methods never met this problem because their
+  per-season S0 absorbed timing. Set `I0_by_season = FALSE` to reproduce the fixed-seed variant.
 - E4 `[data]` The four COVID seasons are excluded as OUTCOMES (same rule as the panel); the season
   window and the RespiCompass/ERVISS stitch follow `stitch_iliplus.R`.
 
@@ -137,12 +145,20 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   model's `prop_ili_age` offsets are dropped by decision). Consequently age differences in observed
   ILI+ must be explained by the DYNAMICS (contact structure, susceptibility) -- a strong, testable
   assumption.
-- F2 `[stan][proposal]` Expected ILI+ per age and week: `mu[t,a] = c_country * (new infections in
-  week t, age a, with vaccinated infections weighted (1 - ve_ili_cond_inf)) + b_country`, with `c`
-  the reporting proportion (per country, shared across seasons and ages; the Stan `prop_ili`) and `b`
-  an off-season baseline (from the susceptibility methods; the Stan model had none).
-  `[open]` whether `c` may drift by season (a weak per-season deviation, as the disabled Stan
-  `prop_ili_season` intended).
+- F2 `[stan][proposal, revised on evidence -- pending owner]` Expected ILI+ per age and week:
+  `mu[t,a] = c_{c,s,a} * (new infections in week t, age a, vaccinated infections weighted
+  (1 - ve_ili_cond_inf)) + b_source * N_a / 1e5`, with
+  `c_{c,s,a} = c_c * 2^(off_a) * exp(delta_s)`: a country reporting proportion (the Stan `prop_ili`),
+  AGE OFFSETS (the Stan `prop_ili_age`; medium = reference; `off ~ N(0, 1)`; settings `c_by_age`) and
+  a PER-SEASON DEVIATION (the disabled Stan `prop_ili_season`; `delta ~ N(0, 0.5)`; `c_by_season`).
+  Both switches default to ON on Danish evidence and await the owner's decision: (i) with age-invariant
+  reporting the medium group is over-predicted ~2x in every season and the age-offset fit is 118 nats
+  better (fitted: young 2.1x, elderly 2.8x the medium rate per infection); (ii) with S0 shared and R0_s
+  the only season factor the 2015/16, 2017/18 and 2024/25 peaks (2-4x larger) cannot be reproduced --
+  a larger R0 makes a wave sharper and earlier as well as bigger -- and the season deviation absorbs
+  them (89 nats; deviations 0.5-1.7x). The baseline `b` is PER SOURCE (`b_by_source`): RespiCompass
+  ILI+ is exactly zero in weeks without detections (24-52 zeros per pre-COVID season in DK) while the
+  ERVISS reconstruction has a positive floor, and one shared b forced phi towards 1.
 - F3 `[stan][proposal]` Scale: ILI+ rates per 100 000 of the age group are converted to COUNTS via
   `rate * pop_a / 1e5` -- with EACH age group's own population (the legacy `make_stan_list()` indexed
   `pop_age_group[1,]`, i.e. scaled every age group by the 0-4 population; a bug, not replicated) --
@@ -180,19 +196,35 @@ assumptions of the previous Stan model except where the owner has explicitly cha
 - G1 `[owner]` The filter's purpose is to let the fitted "true" trajectory wiggle more than a
   deterministic SIR fitted to the data would -- ordinary state process noise, NOT an autocorrelated
   transmission process.
-- G2 `[proposal]` Process noise enters the infected compartments MULTIPLICATIVELY (on log I, i.e. an sd
-  proportional to the current I) with one shared variance `q` per fit, regularised small
-  (`log q ~ N(log 0.05, 1)` `[open]`). Rationale: additive noise on I is loosest, in relative terms,
-  exactly during the seeding/rise window that identifies `S0` (2026-08 review); proportional noise is
-  scale-free across age groups and seasons.
-- G3 `[stan-r]` Initial-state covariance is tight (as in the existing EKF: sd = 5% of S0 and I0), so
-  the fitted initial condition is trusted and the noise only makes modest weekly corrections.
+- G2 `[proposal, revised on evidence]` Process noise enters the infected compartments
+  MULTIPLICATIVELY (sd = q x I per week), FIXED at q = 0.05 (settings `q_fixed`; NULL estimates it under
+  `log q ~ N(log 0.1, 0.5)`). Why fixed: estimated freely on Denmark the filter escaped to q = 0.3-0.6,
+  at which point it carried the wave by state corrections and the mechanistic parameters stopped
+  mattering to the likelihood (the 'loose filter masks the model' failure in decisions.md). In an
+  exponentially growing system even a small weekly q compounds, so q is a modelling choice ('how much
+  may the trajectory wiggle'), not a well-identified parameter. Proportional noise is scale-free
+  across age groups and seasons and avoids the early-rise looseness of additive noise.
+- G3 `[proposal, revised on evidence]` NO initial-state uncertainty (P0 = 0). The single-population
+  EKF used sd = 5% of S0 and I0; here that covariance scales with the fitted per-season seed, and the
+  optimiser exploited it: the EKF objective genuinely preferred a degenerate mode (negll 6564 vs 9100
+  at the deterministic optimum) in which an inflated seed inflated P0 and the filter did the fitting
+  while c, b and phi collapsed. With P0 = 0 the ordering reverses (5573 vs 7366) and the EKF optimum
+  agrees with the deterministic stage in every parameter (S0 0.830 vs 0.834; R0_s within 0.02).
+- G4 `[proposal]` TWO-STAGE fitting (settings `two_stage`): stage 1 fits the deterministic model
+  (y ~ N(mu, mu + mu^2/phi), no filter, multi-start); stage 2 starts the EKF there. Stage 1 is the
+  well-posed objective that pins timing and shape; stage 2 is the noise-aware refinement. Both
+  optima are kept in the fit object and drawn in the fit figure (dotted = stage 1).
 
 ## 8. Priors (as optim penalties on transformed parameters)
 
-- H1 `[proposal]` `logit(S0[c,s]) ~ N(logit 0.75, 1)` (from the susceptibility methods).
-- H2 `[owner][proposal]` `log(R0_s) ~ N(log 1.5, 0.05)`.
-- H3 `[proposal]` `log(phi) ~ N(log 15, 0.8)`; `log(q)` as G2; `c`, `b` unpenalised (data-scale).
+- H1 `[proposal]` `logit(S0_c) ~ N(logit 0.75, 1)` (from the susceptibility methods).
+- H2 `[owner][proposal]` `log(R0_s) ~ N(log 1.5, 0.05)`. Sensitivity on Denmark: widening to sd 0.1-0.3
+  changed nothing (the likelihood itself keeps R0_s within 1.44-1.60), so the width is not what limits
+  the fit; season SIZE differences are carried by the reporting deviation (F2), not by R0.
+- H3 `[proposal, revised on evidence]` `log(phi) ~ N(log 4, 0.5)`. The age-specific weekly ILI+
+  series scatter 23% (median) around a 3-week moving average, i.e. phi ~ 3 is the irreducible noise
+  even for a perfect mean; the earlier centre of 15 was wrong for these data. `log c ~ N(log 0.05, 2)`
+  (weak; closes a 'no epidemic' trap at c -> 0); `b` unpenalised.
 
 ## 9. Inference
 

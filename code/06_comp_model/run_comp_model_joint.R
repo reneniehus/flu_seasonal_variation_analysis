@@ -60,10 +60,10 @@ ggsave("output/comp_model/joint_S0_countries.png", p2, width = 6, height = 4, dp
 for (i in seq_along(run_countries)){
   cc = run_countries[i]; cd = cds[[cc]]; f = cm_fixed(cd$Cn, cd$N, settings); K = length(cd$seasons)
   R0s = jf$params$R0[match(cd$seasons, jf$seasons)]
-  det = lapply(seq_len(K), function(s){ sim = cm_simulate_season(f, jf$params$S0[i], R0s[s], cd$n_weeks[s], cd$vax_day, cd$vax_frac[[s]])
-    list(mu = cm_mu(sim$inc, f, jf$params$c[i], jf$params$b[i]), attack = sim$attack) })
+  det = lapply(seq_len(K), function(s){ sim = cm_simulate_season(f, jf$params$S0[i], R0s[s], cd$n_weeks[s], cd$vax_day, cd$vax_frac[[s]], I0 = jf$params$I0[[i]][s])
+    list(mu = cm_mu(sim$inc, f, jf$params$c[i], jf$params$b[i]), attack = sim$attack) })   # joint stage: scalar c per country (age/season deviations: TODO)
   fake = list(country = paste0(cc, " (joint)"), seasons = cd$seasons, groups = cd$groups, N = cd$N, settings = settings,
-              params = list(S0 = jf$params$S0[i], R0 = R0s, c = jf$params$c[i], b = jf$params$b[i], phi = jf$params$phi[i], q = jf$params$q),
+              params = list(S0 = jf$params$S0[i], R0 = R0s, I0 = jf$params$I0[[i]], c = jf$params$c[i], b = jf$params$b[i], phi = jf$params$phi[i], q = jf$params$q),
               y = cd$y, mu_filt = lapply(jf$filt[[i]], `[[`, "mu_pred"), mu_det = lapply(det, `[[`, "mu"),
               attack = do.call(rbind, lapply(det, `[[`, "attack")), R_eff = R0s * jf$params$S0[i], vax = cd$vax)
   ggsave(sprintf("output/comp_model/joint_fit_%s.png", cc), plot_cm_fit(fake), width = 2.6 * K + 2, height = 7.5, dpi = 110)

@@ -45,25 +45,62 @@ comp_model_settings = function(){
   # across its seasons; across countries by pooling R0_s).
   p$S0_by_season    = FALSE       # [owner] one S0 per country, shared across seasons (E2)
   p$S0_by_age       = FALSE       # [proposal] ... and shared across age groups (E2)
-  p$I0_fraction     = 1e-5        # [proposal] fixed seed in every age group on season day 1 (E3)
+  p$I0_fraction     = 1e-5        # [proposal] the seed in every age group on season day 1 (E3); the centre of the per-season prior below
+  # SEASON ARRIVAL TIME (E3, evidence: the Danish fit with a fixed seed peaks ~12 weeks too early in
+  # every season and the filter has to abandon the SIR). With S0 shared across seasons the seed size is
+  # the only smooth handle on WHEN a season arrives: I0_s = I0 * exp(delta_s), delta_s ~ N(0, sd) per
+  # season. It shifts the epidemic by delta_s / r days at growth rate r and leaves r = gamma*(R0_s*S0_c-1)
+  # -- hence the identification of R0_s and S0_c -- untouched. (The Stan model's disabled i_season term.)
+  p$I0_by_season    = TRUE        # [proposal] per-season seed size (arrival time); FALSE = the fixed seed of E3 as first agreed
+  p$prior_logI0_sd  = 2.5         # [proposal] wide: a factor ~12 at 1 sd, i.e. +/- ~5 weeks of arrival at r = 0.07/day
   p$season_start_monthday = "-08-01"   # [data] as the panel
   p$reset_each_season = TRUE      # [stan] compartments reset at every season start; no immunity carry-over (E1)
 
   # ---- |-observation model (F1-F5) ----
   p$detection_age_invariant = TRUE   # [owner] one positivity and one reporting proportion for all ages (F1, F2)
-  p$c_by_season     = FALSE       # [open]  reporting proportion c per country, shared across seasons (F2)
+  # Age-specific reporting offsets (the Stan model's prop_ili_age: c_a = c * 2^(off_a), medium = reference,
+  # off ~ N(0, 1)). OFF by the owner's decision; the switch exists because the Danish fit under-predicts
+  # the elderly ~2x in every season, so the two variants must be comparable side by side.
+  p$c_by_age        = TRUE        # [proposal, pending owner] evidence: DK stage-1 fit 118 nats better; medium adults report ~0.5x the young, ~0.35x the elderly
+  p$prior_logc_age_sd = 1
+  # Per-season reporting deviation (the Stan model's disabled prop_ili_season): c_{c,s} = c_c * exp(delta_s),
+  # delta_s ~ N(0, sd). Evidence for needing it: with S0_c shared and R0_s the only season factor, the
+  # Danish fit cannot reproduce the 2-4x larger 2015/16 and 2017/18 peaks even under a wide R0 prior
+  # (a larger R0 also makes the wave sharper and earlier), so the fit treats them as noise (phi ~ 1).
+  # ILI per infection plausibly differs by season/subtype (symptomaticity, care-seeking, positivity).
+  p$c_by_season     = TRUE        # [proposal, pending owner] evidence: DK stage-1 fit 89 nats better; deviations 0.5-1.7x track the big/small seasons
+  p$prior_logc_season_sd = 0.5    # [proposal] a factor ~2.7 at 2 sd
   p$rate_per        = 1e5         # [stan]  ILI+ rates are per 100 000 of the age group; counts = rate * pop / 1e5 (F3)
+  # Off-season baseline b PER DATA SOURCE: RespiCompass ILI+ is exactly 0 in weeks without flu detections,
+  # ERVISS-era reconstructions sit at a positive floor; one shared b cannot be both (the Danish fit forced
+  # phi ~ 1 to make hundreds of exact zeros plausible under a ~100-count baseline).
+  p$b_by_source     = TRUE        # [proposal] log_b per source (RespiCompass, ERVISS) instead of one b
   p$use_cum_burden_term = FALSE   # [owner] no separate cumulative-burden likelihood, no likelihood weights (F4)
   p$obs_weights     = NULL        # [owner] weight_obs_epi dropped (F4)
 
   # ---- |-process noise / EKF (G1-G3) ----
   p$noise_on        = "log_I"     # [proposal] multiplicative process noise on the infected fractions (G2)
-  p$prior_logq      = c(mean = log(0.05), sd = 1)   # [open] regularise q small
-  p$p0_frac         = 0.05        # [stan-r] initial-state sd as a fraction of S0 / I0 (G3)
+  # q is the weekly multiplicative sd of the infected fractions: 0.05 = 5% wiggle, 0.6 = the filter can
+  # nearly reset the state every week. The first Danish fits escaped to q = 0.6 / phi = 1 under a weak
+  # prior (log-sd 1), at which point the deterministic SIR no longer mattered to the likelihood -- the
+  # 'loose filter masks the model' failure recorded in decisions.md. Hence a firm prior: 95% in [0.04, 0.27].
+  p$prior_logq      = c(mean = log(0.1), sd = 0.5)   # [proposal] firm (used only when q_fixed is NULL)
+  # q FIXED (owner intent: 'let the trajectory wiggle', not 'let the filter replace the model'). Estimating
+  # q from the EKF likelihood let the filter take over (q -> 0.23-0.6) and the backbone parameters drifted
+  # away from the stage-1 optimum to an early, oversized deterministic wave. With q fixed at 10% weekly
+  # the filter adds modest corrections and the structural parameters stay identified by the data.
+  p$q_fixed         = 0.05        # [proposal] 5% weekly; NULL = estimate q with the prior above (see ASSUMPTIONS.md G2)
+  # P0 = 0 (G3, decisive Danish evidence): with an initial covariance proportional to the fitted seed,
+  # the EKF objective PREFERRED a degenerate mode (negll 6564 vs 9100 at the deterministic optimum):
+  # inflating the seed inflated P0, and the filter then carried the wave by state corrections while c, b,
+  # phi collapsed. With P0 = 0 the ordering reverses (5573 vs 7366) and the EKF optimum agrees with the
+  # deterministic stage in every parameter. The process noise alone provides the wiggle.
+  p$p0_frac         = 0           # [proposal] no initial-state uncertainty (the single-population EKF used 0.05)
 
   # ---- |-priors as penalties (H1-H3) ----
   p$prior_logitS0   = c(mean = qlogis(0.75), sd = 1)   # [proposal]
-  p$prior_logphi    = c(mean = log(15), sd = 0.8)      # [proposal]
+  p$prior_logphi    = c(mean = log(4), sd = 0.5)       # [proposal] centred on the MEASURED noise: the Danish age-specific series scatter
+                                                       # 23% (median) around a 3-week moving average, i.e. phi ~ 3 even for a perfect mean
 
   # ---- |-inference (I1-I2) ----
   # FEASIBILITY NOTE. State per country-season = 3 ages x (S_u,I_u,S_v,I_v) + 3 weekly-incidence
@@ -79,8 +116,14 @@ comp_model_settings = function(){
   p$engine          = "cpp"           # "cpp" = the Rcpp port (verified identical to the R reference by test-comp-model-cpp.R; ~17x faster) | "R" = the reference
   p$n_starts        = 4
   p$optim_maxit     = 300
-  p$prior_logc      = NULL        # reporting proportion c: unpenalised (data-scale)
+  p$prior_logc      = c(mean = log(0.05), sd = 2)   # reporting proportion: WEAK (a factor ~50 at 2 sd); it exists only to
+                                                    # close the 'no epidemic' trap (c -> 1e-200, everything baseline + noise) seen on DK
   p$prior_logb      = NULL        # baseline b (rate per 100 000): unpenalised
+  # STAGED FITTING (I1). Stage 1 fits the DETERMINISTIC model (no filter: y ~ N(mu_det, mu + mu^2/phi)),
+  # a well-behaved objective that forces the SIR to match timing and shape; stage 2 starts the EKF at
+  # that optimum with q regularised. Fitting the EKF from scratch let the filter dominate the likelihood
+  # (q -> 0.6, phi -> 1) and the backbone parameters wandered.
+  p$two_stage       = TRUE
 
   p
 }

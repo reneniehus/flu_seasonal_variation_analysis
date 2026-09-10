@@ -95,16 +95,20 @@ cm_week = function(x, f, beta, day0, vax_day = NA, vax_frac = NULL, jac = FALSE)
 }
 
 # ---- |-initial state of a season ----
-cm_init = function(f, S0){
+# I0: the seed (infected fraction of every age group on season day 1). Fixed at settings$I0_fraction
+# by default; when settings$I0_by_season is TRUE the fit supplies a per-season value, which is the
+# smooth way to set each season's ARRIVAL TIME (a seed k times smaller arrives log(k)/r days later
+# at growth rate r) without touching the growth rate itself (R0_s * S0_c). See ASSUMPTIONS.md E3.
+cm_init = function(f, S0, I0 = f$I0){
   L = f$L; x = numeric(L$n)
-  x[L$S_u] = S0; x[L$I_u] = f$I0                        # implied R_u = 1 - S0 - I0
+  x[L$S_u] = S0; x[L$I_u] = I0                          # implied R_u = 1 - S0 - I0
   x
 }
 
 # ---- |-deterministic season: weekly expected observation-relevant incidence (fraction of group) ----
 # Returns list(inc = n_weeks x A matrix of C per week, S_end, attack = per-age cumulative infections).
-cm_simulate_season = function(f, S0, R0, n_weeks, vax_day = NA, vax_frac = NULL){
-  L = f$L; beta = R0 * f$gamma; x = cm_init(f, S0)
+cm_simulate_season = function(f, S0, R0, n_weeks, vax_day = NA, vax_frac = NULL, I0 = f$I0){
+  L = f$L; beta = R0 * f$gamma; x = cm_init(f, S0, I0)
   inc = matrix(NA_real_, n_weeks, f$n_age)
   for (t in seq_len(n_weeks)){
     x = cm_week(x, f, beta, day0 = 7 * (t - 1), vax_day, vax_frac)
@@ -114,17 +118,19 @@ cm_simulate_season = function(f, S0, R0, n_weeks, vax_day = NA, vax_frac = NULL)
 }
 
 # ---- |-expected observed counts from incidence fractions ----
-cm_mu = function(inc, f, c, b) sweep(inc, 2, c * f$N, "*") + matrix(b * f$N / f$rate_per, nrow(inc), f$n_age, byrow = TRUE)
+# c: the reporting proportion, a scalar (age-invariant, F2) or a vector of length n_age (c_by_age)
+cm_mu = function(inc, f, c, b) sweep(inc, 2, rep_len(c, f$n_age) * f$N, "*") + matrix(b * f$N / f$rate_per, nrow(inc), f$n_age, byrow = TRUE)
 
 # ---- |-EKF over one season: returns the innovation log-likelihood + filtered/predicted quantities ----
 # y: n_weeks x A matrix of observed COUNTS (NA = not observed). q: multiplicative process-noise sd on I.
-cm_ekf_season = function(y, f, S0, R0, c, b, phi, q, vax_day = NA, vax_frac = NULL){
+cm_ekf_season = function(y, f, S0, R0, c, b, phi, q, vax_day = NA, vax_frac = NULL, I0 = f$I0){
   L = f$L; A = f$n_age; n_weeks = nrow(y); beta = R0 * f$gamma
-  x = cm_init(f, S0)
+  x = cm_init(f, S0, I0)
   P = matrix(0, L$n, L$n)
   P[cbind(L$S_u, L$S_u)] = (f$p0 * S0)^2                # tight initial covariance: trust the fitted S0, I0
-  P[cbind(L$I_u, L$I_u)] = (f$p0 * f$I0)^2
-  Hbase = matrix(0, A, L$n); Hbase[cbind(seq_len(A), L$C)] = c * f$N   # mu = c N C + b N/rate_per
+  P[cbind(L$I_u, L$I_u)] = (f$p0 * I0)^2
+  cA = rep_len(c, A)                                    # scalar or per-age reporting proportion
+  Hbase = matrix(0, A, L$n); Hbase[cbind(seq_len(A), L$C)] = cA * f$N   # mu = c_a N_a C_a + b N_a/rate_per
   b_cnt = b * f$N / f$rate_per
   ll = 0; mu_pred = matrix(NA_real_, n_weeks, A); I_filt = matrix(NA_real_, n_weeks, A); S_filt = I_filt
   for (t in seq_len(n_weeks)){

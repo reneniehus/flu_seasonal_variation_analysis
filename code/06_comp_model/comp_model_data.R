@@ -85,5 +85,6 @@ build_comp_data = function(country, models_in, demo, settings,
        N = N, N4 = N4, Cn = cm$C, contact_source = if (!is.null(ct[[country_long]])) country_long else "EU average",
        rates = rates, y = y, n_weeks = vapply(y, nrow, integer(1)),
        vax = vax, vax_day = vax_day, vax_frac = vax_frac,
-       source = panel %>% filter(country_short == country) %>% distinct(season, source))
+       source = panel %>% filter(country_short == country) %>% distinct(season, source),
+       source_by_season = { sb = panel %>% filter(country_short == country) %>% distinct(season, source); setNames(sb$source, sb$season)[seasons] })
 }

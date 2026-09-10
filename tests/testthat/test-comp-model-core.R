@@ -87,6 +87,7 @@ test_that("parameter recovery on synthetic seasons: S0 and the season R0 orderin
   cd$rates <- lapply(cd$y, function(y) sweep(y, 2, N3 / settings$rate_per, "/"))
   cd$n_weeks <- rep(36L, 3)
   cd$vax <- data.frame(season = cd$seasons, coverage = 0.5, provenance = "synthetic")
+  cd$source_by_season <- setNames(rep("ERVISS", 3), cd$seasons)      # the per-source baseline needs a source label
   fit <- fit_comp_model(cd, settings, R0_free = TRUE, n_starts = 2, verbose = FALSE)
   expect_equal(fit$convergence, 0L)
   expect_lt(abs(fit$params$S0 - S0_true), 0.06)
