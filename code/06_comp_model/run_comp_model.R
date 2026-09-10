@@ -6,9 +6,10 @@
 # Prerequisites: output/models_in.rds and output/demography_respicast.Rdata (code/00_main.R).
 # Run from the repo root:  Rscript code/06_comp_model/run_comp_model.R [country ...]
 #
-# Runtime note (base-R reference): one likelihood evaluation is ~0.15 s for an 8-season country, a
-# numerical gradient ~3.5 s, so a 4-start fit is ~20 min on 4 cores. The Rcpp port (stage iii) is
-# for the joint fit, not for this stage.
+# Runtime note: with the base-R reference engine one likelihood evaluation is ~0.15 s for an
+# 8-season country (numerical gradient ~3.5 s; a 4-start fit ~20 min on 4 cores); with the C++
+# engine (settings$engine = "cpp", verified identical by test-comp-model-cpp.R) ~17x less.
+# Do not run the testthat suite concurrently: its setup rebuilds the output/ caches this reads.
 
 suppressMessages(source("code/01_main_supporting/setup.R"))
 source("code/01_main_supporting/stitch_iliplus.R")
@@ -16,19 +17,21 @@ source("code/01_main_supporting/sir_core.R")                 # .fit_multistart
 source("code/06_comp_model/contact_matrix.R")
 source("code/06_comp_model/comp_model_settings.R")
 source("code/06_comp_model/comp_model_core.R")
+source("code/06_comp_model/comp_model_cpp.R")
 source("code/06_comp_model/comp_model_data.R")
 source("code/06_comp_model/comp_model_fit.R")
 source("code/06_comp_model/comp_model_report.R")
+if (comp_model_settings()$engine == "cpp") cm_load_cpp()
 
 args = commandArgs(trailingOnly = TRUE)
-countries = if (length(args)) args else c("DK", "FR", "EE", "ES", "NO")
+run_countries = if (length(args)) args else c("DK", "FR", "EE", "ES", "NO")
 settings  = comp_model_settings()
 models_in = readRDS("output/models_in.rds")
 load("output/demography_respicast.Rdata"); demo = obj
 dir.create("output/comp_model", showWarnings = FALSE, recursive = TRUE)
 
 fits = list()
-for (cc in countries){
+for (cc in run_countries){
   cd  = build_comp_data(cc, models_in, demo, settings)
   cat(sprintf("\n== %s: %d seasons, groups N = %s, contacts = %s ==\n", cc, length(cd$seasons),
               paste(format(cd$N, big.mark = ","), collapse = " / "), cd$contact_source))

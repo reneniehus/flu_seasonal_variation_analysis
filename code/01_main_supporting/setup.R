@@ -89,45 +89,42 @@ options(ggplot2.discrete.colour = function(...) ggplot2::scale_colour_brewer(...
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 ### Medium-complex functions ##########
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-countries <- c("Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus", "Czechia", 
-               "Denmark", "Estonia", "Finland", "France", "Germany", "Greece", 
-               "Hungary", "Iceland", "Ireland", "Italy", "Latvia", "Liechtenstein", 
-               "Lithuania", "Luxembourg", "Malta", "Netherlands", "Norway", 
-               "Poland", "Portugal", "Romania", "Slovakia", "Slovenia", "Spain", 
-               "Sweden",
-               # non EU/EEA
-               "Switzerland","England","Northern Ireland","Scotland","EU/EEA")
-countries_short <- c("AT", "BE", "BG", "HR", "CY", "CZ", 
-                     "DK", "EE", "FI", "FR", "DE", "GR", 
-                     "HU", "IS", "IE", "IT", "LV", "LI", 
-                     "LT", "LU", "MT", "NL", "NO", 
-                     "PL", "PT", "RO", "SK", "SI", "ES", 
-                     "SE",
-                     # non EU/EEA
-                     "CH","GB-ENG","GB-NIR","GB-SCT","EU/EEA")
+# country name <-> ISO2 lookup (PRIVATE tables: dotted names so a script-level `countries`
+# variable cannot shadow them -- that shadowing once broke every long-name lookup downstream)
+.eu_country_long <- c("Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus", "Czechia",
+                      "Denmark", "Estonia", "Finland", "France", "Germany", "Greece",
+                      "Hungary", "Iceland", "Ireland", "Italy", "Latvia", "Liechtenstein",
+                      "Lithuania", "Luxembourg", "Malta", "Netherlands", "Norway",
+                      "Poland", "Portugal", "Romania", "Slovakia", "Slovenia", "Spain",
+                      "Sweden",
+                      # non EU/EEA
+                      "Switzerland","England","Northern Ireland","Scotland","EU/EEA")
+.eu_country_short <- c("AT", "BE", "BG", "HR", "CY", "CZ",
+                       "DK", "EE", "FI", "FR", "DE", "GR",
+                       "HU", "IS", "IE", "IT", "LV", "LI",
+                       "LT", "LU", "MT", "NL", "NO",
+                       "PL", "PT", "RO", "SK", "SI", "ES",
+                       "SE",
+                       # non EU/EEA
+                       "CH","GB-ENG","GB-NIR","GB-SCT","EU/EEA")
 
-
-# EL 
-#EU_short("Greece") <- "EL"
-# EU_short("Greece","EL")
-EU_short <- function(name_long,greece="GR" # or "EL
-){
+# long name -> ISO2 (Greece as "GR" by default, "EL" on request)
+EU_short <- function(name_long, greece="GR"){
   name_short = name_long
   for (i in 1:length(name_long)) {
-    name_short[i] <- countries_short[which(countries%in%name_long[i])]
+    name_short[i] <- .eu_country_short[which(.eu_country_long %in% name_long[i])]
     if (name_long[i]=="Greece"&greece=="GR") name_short[i]<-"GR"
     if (name_long[i]=="Greece"&greece!="GR") name_short[i]<-"EL"
   }
-  
   return(name_short)
 }
-# inverse mapping (short -> long); used by the compartmental model's data builder, whose contact
-# matrices and population pyramids are keyed by long country names
+# ISO2 -> long name; used by the compartmental model's data builder, whose contact matrices and
+# population pyramids are keyed by long country names
 EU_long <- function(name_short, greece="GR"){
   name_long = name_short
   for (i in 1:length(name_long)) {
     if (name_short[i]=="EL"&greece=="EL") name_short[i]<-"GR"
-    name_long[i] <- countries[which(countries_short%in%name_short[i])]
+    name_long[i] <- .eu_country_long[which(.eu_country_short %in% name_short[i])]
   }
   return(name_long)
 }

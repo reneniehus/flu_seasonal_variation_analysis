@@ -202,11 +202,14 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   multi-start optim on the EKF likelihood (the existing harness); (iii) an Rcpp port of the Kalman
   loop, and (iv) the JOINT fit of all countries and seasons with `R0_s` shared (feasibility note in
   the settings file).
-- I2 `[owner]` The base-R model and the C++ implementation must remain IDENTICAL: a test evaluates
-  both likelihoods and both filtered trajectories on the same data and parameters and requires
-  agreement to numerical precision (1e-10 relative); the C++ code carries a header note that the
-  R version is the reference and every change must be made in both. (Test and note are added with
-  the port, stage iii.)
+- I2 `[owner]` The base-R model and the C++ implementation must remain IDENTICAL:
+  `tests/testthat/test-comp-model-cpp.R` evaluates both engines on the same data and parameters
+  (synthetic with missing cells, a pulse and large process noise; the real Danish fit when present)
+  and requires the log-likelihoods, one-step-ahead means and filtered S and I to agree to 1e-10
+  relative. `comp_model_core.cpp` carries the header note that the R version
+  (`comp_model_core.R`) is the reference and that every model change must be made in both files.
+  Measured speed-up ~17x; the fitter and the joint fit dispatch through
+  `cm_ekf_season_engine(engine = "R" | "cpp")` (`comp_model_cpp.R`).
 - I3 `[proposal]` Point estimates are MAP (penalised EKF likelihood); uncertainty from the Hessian
   (Laplace) at the optimum; no MCMC.
 

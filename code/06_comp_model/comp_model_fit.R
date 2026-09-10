@@ -27,9 +27,11 @@ cm_logprior = function(theta, K, R0_free, settings){
 # ---- |-penalised negative log-likelihood over a country's seasons ----
 cm_negll = function(theta, cd, f, settings, R0_free = TRUE, return_fit = FALSE){
   K = length(cd$seasons); p = cm_unpack(theta, K, R0_free, settings)
+  engine = if (is.null(settings$engine) || !exists("cm_ekf_season_engine", mode = "function")) "R" else settings$engine
   ll = 0; filt = vector("list", K)
   for (s in seq_len(K)){
-    e = cm_ekf_season(cd$y[[s]], f, p$S0, p$R0[s], p$c, p$b, p$phi, p$q, cd$vax_day, cd$vax_frac[[s]])
+    e = if (engine == "R") cm_ekf_season(cd$y[[s]], f, p$S0, p$R0[s], p$c, p$b, p$phi, p$q, cd$vax_day, cd$vax_frac[[s]])
+        else cm_ekf_season_engine(cd$y[[s]], f, p$S0, p$R0[s], p$c, p$b, p$phi, p$q, cd$vax_day, cd$vax_frac[[s]], engine = engine)
     ll = ll + e$loglik; filt[[s]] = e
   }
   lp = cm_logprior(theta, K, R0_free, settings)

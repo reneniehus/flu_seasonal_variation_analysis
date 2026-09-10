@@ -76,6 +76,7 @@ comp_model_settings = function(){
   # ~1 min per gradient, hours per joint fit -- feasible, and exact gradients (TMB/autodiff) would make
   # it minutes. So: base R for the reference model and the per-country stage; Rcpp for the joint fit.
   p$stage           = "per_country"   # "per_country" (S0_c + regularised R0_{c,s} per country) | "joint" (R0_s shared across countries)
+  p$engine          = "cpp"           # "cpp" = the Rcpp port (verified identical to the R reference by test-comp-model-cpp.R; ~17x faster) | "R" = the reference
   p$n_starts        = 4
   p$optim_maxit     = 300
   p$prior_logc      = NULL        # reporting proportion c: unpenalised (data-scale)
