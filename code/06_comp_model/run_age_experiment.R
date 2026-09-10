@@ -60,12 +60,18 @@ run_age_experiment = function(countries = age_experiment_countries, variants = n
     if (is.null(cd)) next
     for (v in variants){
       s = comp_model_settings(); s$c_by_age = unname(age_experiment_variants[[v]]["c_by_age"]); s$susc_by_age = unname(age_experiment_variants[[v]]["susc_by_age"])
-      # WARM START: B, C and D nest A, so they start at A's deterministic optimum (new slots at 0) --
-      # from the data-driven start alone the susceptibility variants wandered into worse optima than A
-      warm = NULL
-      if (v != "A_none"){ fa = file.path(dir, sprintf("fit_%s_A_none.rds", cc)); if (file.exists(fa)) warm = readRDS(fa)$stage1$theta }
-      t0 = Sys.time()
-      fit = tryCatch(fit_comp_model(cd, s, R0_free = TRUE, verbose = FALSE, start = warm), error = function(e){ cat("FAIL", cc, v, ":", conditionMessage(e), "\n"); NULL })
+      # WARM STARTS: B and C nest A and start at A's deterministic optimum (new slots at 0) -- from the
+      # data-driven start alone the susceptibility variants wandered into worse optima than A. D nests
+      # both B and C and the objective is BIMODAL (a reporting-like and a susceptibility-like optimum),
+      # so D starts from each of the two and keeps the better; a missing parent falls back to A.
+      parents = if (v == "D_both") c("B_reporting", "C_susceptibility") else "A_none"
+      warms = lapply(parents, function(pv){ fp = file.path(dir, sprintf("fit_%s_%s.rds", cc, pv)); if (file.exists(fp)) readRDS(fp)$stage1$theta else NULL })
+      warms = Filter(Negate(is.null), warms); if (!length(warms)) warms = list(NULL)
+      t0 = Sys.time(); fit = NULL
+      for (w in warms){
+        fw = tryCatch(fit_comp_model(cd, s, R0_free = TRUE, verbose = FALSE, start = w), error = function(e){ cat("FAIL", cc, v, ":", conditionMessage(e), "\n"); NULL })
+        if (!is.null(fw) && (is.null(fit) || fw$negll < fit$negll)) fit = fw
+      }
       if (is.null(fit)) next
       fit$Cn = cd$Cn; saveRDS(fit, file.path(dir, sprintf("fit_%s_%s.rds", cc, v)))
       rows[[length(rows) + 1]] = r = age_experiment_row(fit, cc, v)
