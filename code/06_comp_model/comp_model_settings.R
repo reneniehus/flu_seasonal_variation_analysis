@@ -53,6 +53,9 @@ comp_model_settings = function(){
   # through the dynamics -- and through external attack-rate profiles (PHIRST, South Africa).
   p$susc_by_age     = FALSE       # [open] fit log2 sigma_young, log2 sigma_elderly; prior N(0, 1)
   p$prior_log2susc_sd = 1
+  p$susc_fixed      = NULL        # or a FIXED profile c(young, 1, elderly) when susc_by_age is FALSE -- the device of
+                                  # run_susc_grid.R: one profile SHARED across countries (biology) with reporting
+                                  # offsets free per country (surveillance); NULL = no age profile
   p$I0_fraction     = 10^-6.5     # [owner, 2026-09] centre of the per-season seed prior (E3); recentred from 1e-5 after 29% of the
                                   # fitted seeds (5 countries, 35 seasons; median 10^-6.4, range 10^-8.8..10^-3.6) fell below
                                   # the old prior's lower 2.5% bound -- late waves need small seeds

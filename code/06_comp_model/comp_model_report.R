@@ -247,6 +247,39 @@ plot_cm_age_experiment = function(tab){
   list(misfit = p1, effects = p2, likelihood = p3, attack = p4)
 }
 
+# res: the list of collect_susc_grid() (run_susc_grid.R): $profile = total negll per shared profile
+# (young, elderly), $tab = every country x profile fit. Two panels: the profile likelihood summed
+# over countries (tiles; the number is the gain in nats over no profile), and each country's own
+# gain curve along the young axis at its best elderly value (one line per country) -- a shared
+# profile is credible when the country curves agree on where the gain is, not only the sum.
+plot_cm_susc_grid = function(res){
+  prof = res$profile %>% mutate(young = factor(susc_young), elderly = factor(susc_elderly))
+  best = prof %>% slice_max(gain_ekf, n = 1)
+  p1 = ggplot(prof, aes(young, elderly, fill = gain_ekf)) + geom_tile() +
+    geom_text(aes(label = sprintf("%.0f", gain_ekf)), size = 3) +
+    geom_tile(data = best, fill = NA, colour = "black", linewidth = 1) +
+    scale_fill_gradient2(low = "#2166ac", mid = "white", high = "#b2182b", midpoint = 0, name = "gain over\n(1, 1), nats") +
+    labs(title = sprintf("One susceptibility profile for all %d countries, reporting offsets free per country: profile likelihood (EKF)", max(prof$n)),
+         subtitle = "relative per-contact susceptibility of the young and the elderly (medium = 1); total over countries of negll(1,1) - negll(profile); box = best",
+         x = "young susceptibility (x medium)", y = "elderly susceptibility (x medium)") + theme_minimal(base_size = 10) + theme(plot.subtitle = element_text(size = 8))
+  cs = sort(unique(res$tab$country)); ccol = setNames(grDevices::hcl.colors(length(cs), "Dark 3"), cs)
+  per = res$tab %>% group_by(country) %>% mutate(gain = negll_ekf[susc_young == 1 & susc_elderly == 1] - negll_ekf) %>% ungroup()
+  p2 = ggplot(per, aes(susc_young, gain, colour = country, group = country)) + geom_hline(yintercept = 0, colour = "grey60") +
+    geom_line(alpha = 0.7) + geom_point(size = 1.5) + facet_wrap(~ susc_elderly, labeller = label_both) + scale_colour_manual(values = ccol, name = NULL) +
+    labs(title = "The same profile likelihood per country (gain over no profile, nats), by elderly susceptibility",
+         subtitle = "lines rising together = a shared young effect the weekly data want even with each country's reporting level free; a country falling = its data disagree",
+         x = "young susceptibility (x medium)", y = "gain, nats") + theme_minimal(base_size = 10) + theme(plot.subtitle = element_text(size = 8))
+  list(profile = p1, per_country = p2)
+}
+
+save_cm_susc_grid = function(res, dir = "output/comp_model/susc_grid"){
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE); ps = plot_cm_susc_grid(res)
+  ggsave(file.path(dir, "susc_profile_likelihood.png"), ps$profile, width = 8, height = 5, dpi = 110)
+  ggsave(file.path(dir, "susc_profile_per_country.png"), ps$per_country, width = 11, height = 4.5, dpi = 110)
+  write.csv(res$profile, file.path(dir, "susc_profile.csv"), row.names = FALSE); write.csv(res$tab, file.path(dir, "susc_grid.csv"), row.names = FALSE)
+  invisible(dir)
+}
+
 save_cm_age_experiment = function(tab, dir = "output/comp_model/age_experiment"){
   dir.create(dir, showWarnings = FALSE, recursive = TRUE); ps = plot_cm_age_experiment(tab)
   ggsave(file.path(dir, "age_misfit_variantA.png"), ps$misfit, width = 10, height = 4.5, dpi = 110)

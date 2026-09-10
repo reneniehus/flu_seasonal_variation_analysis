@@ -23,7 +23,8 @@ cm_unpack = function(theta, K, R0_free, settings){
   else c_age = rep(c_med, 3)
   if (isTRUE(settings$c_by_season)){ dev = exp(theta[i:(i + K - 1)]); i = i + K } else dev = rep(1, K)
   c_mat = outer(unname(dev), unname(c_age))                                                        # K x A
-  if (isTRUE(settings$susc_by_age)){ sg = theta[i:(i + 1)]; i = i + 2; sigma = 2^c(sg[1], 0, sg[2]) } else sigma = c(1, 1, 1)   # young, medium (ref), elderly
+  if (isTRUE(settings$susc_by_age)){ sg = theta[i:(i + 1)]; i = i + 2; sigma = 2^c(sg[1], 0, sg[2]) }   # young, medium (ref), elderly
+  else sigma = if (!is.null(settings$susc_fixed)) settings$susc_fixed else c(1, 1, 1)                  # or an externally FIXED profile
   if (isTRUE(settings$b_by_source)){ b = exp(theta[i:(i + 1)]); names(b) = c("RespiCompass", "ERVISS"); i = i + 2 }
   else b = unname(exp(theta[i])); if (!isTRUE(settings$b_by_source)) i = i + 1
   q = if (is.null(settings$q_fixed)) unname(exp(theta[i + 1])) else settings$q_fixed
