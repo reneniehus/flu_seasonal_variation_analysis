@@ -212,7 +212,7 @@ List cm_ekf_season_cpp(NumericMatrix y, NumericMatrix Cn, NumericVector N,
     } else {
       P.swap(Ppr);
     }
-    for (int k = 0; k < 4*A; ++k){ if (x[k] < 1e-12) x[k] = 1e-12; if (x[k] > 1) x[k] = 1; }
+    for (int k = 0; k < 4*A; ++k) x[k] = clamp01(x[k]);   // [0, 1] floor at 0: a positive floor re-seeds I_v weekly (see the R code)
     for (int a = 0; a < A; ++a){ I_filt(t, a) = x[A + a] + x[3*A + a]; S_filt(t, a) = x[a] + x[2*A + a]; }
   }
   return List::create(_["loglik"] = ll, _["mu_pred"] = mu_pred, _["I"] = I_filt, _["S"] = S_filt);

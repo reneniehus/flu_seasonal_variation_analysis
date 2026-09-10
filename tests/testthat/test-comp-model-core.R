@@ -68,17 +68,23 @@ test_that("the R0 calibration is realised by the dynamics: early growth rate = g
 })
 
 test_that("with vanishing process noise and initial uncertainty the EKF reproduces the deterministic model", {
-  sim <- cm_simulate_season(f, 0.75, 1.55, 35, 62, c(0, 0, 0.5))
-  mu  <- cm_mu(sim$inc, f, c = 0.1, b = 2)
-  f0 <- f; f0$p0 <- 1e-9
-  e <- cm_ekf_season(mu, f0, 0.75, 1.55, 0.1, 2, 20, q = 1e-9, 62, c(0, 0, 0.5))
-  expect_equal(e$mu_pred, mu, tolerance = 1e-6)
-  expect_true(is.finite(e$loglik))
+  # also with a tiny seed: the filter's post-update clamp must floor at 0 exactly like the deterministic
+  # step (a positive floor would re-seed I_v every week and the two would drift apart by floor/I0)
+  for (I0 in c(f$I0, 1e-9)){
+    sim <- cm_simulate_season(f, 0.75, 1.55, 35, 62, c(0, 0, 0.5), I0 = I0)
+    mu  <- cm_mu(sim$inc, f, c = 0.1, b = 2)
+    f0 <- f; f0$p0 <- 1e-9
+    e <- cm_ekf_season(mu, f0, 0.75, 1.55, 0.1, 2, 20, q = 1e-9, 62, c(0, 0, 0.5), I0 = I0)
+    expect_equal(e$mu_pred, mu, tolerance = 1e-9)
+    expect_true(is.finite(e$loglik))
+  }
 })
 
 test_that("parameter recovery on synthetic seasons: S0 and the season R0 ordering come back", {
+  # truth chosen so every season completes a wave within 36 weeks at the model's default seed:
+  # R_eff = R0*S0 = 1.21 / 1.28 / 1.36 peaks at weeks ~28 / ~21 / ~16 from I0 = 10^-6.5
   set.seed(7)
-  S0_true <- 0.7; R0_true <- c(1.42, 1.5, 1.6); c_true <- 0.08; b_true <- 3; phi_true <- 25
+  S0_true <- 0.85; R0_true <- c(1.42, 1.5, 1.6); c_true <- 0.08; b_true <- 3; phi_true <- 25
   cd <- list(country = "SYN", seasons = c("A", "B", "C"), groups = names(N3), N = N3, Cn = Cn,
              vax_day = 62, vax_frac = list(c(0,0,.5), c(0,0,.5), c(0,0,.5)))
   cd$y <- lapply(seq_along(R0_true), function(s){
@@ -93,4 +99,40 @@ test_that("parameter recovery on synthetic seasons: S0 and the season R0 orderin
   expect_lt(abs(fit$params$S0 - S0_true), 0.06)
   expect_equal(order(fit$params$R0), order(R0_true))
   expect_true(all(abs(fit$params$R0 - R0_true) < 0.05))
+})
+
+test_that("start vector, unpack and prior agree on the parameter layout for every switch combination", {
+  # a missing slot in any one of the three shifts every later parameter silently (the objective then
+  # reads phi off the end of the vector and returns its 1e10 failure value at every start) -- so every
+  # combination of the layout switches is exercised: right length, named slots read by cm_unpack,
+  # finite objective at the start for both stages, and a prior that responds to exactly its own slots
+  set.seed(3); K <- 2L
+  cd <- list(country = "SYN", seasons = c("A", "B"), groups = names(N3), N = N3, Cn = Cn, vax_day = 62,
+             vax_frac = list(c(0, 0, .5), c(0, 0, .5)), n_weeks = rep(30L, K),
+             vax = data.frame(season = c("A", "B"), coverage = 0.5, provenance = "synthetic"),
+             source_by_season = c(A = "RespiCompass", B = "ERVISS"))
+  cd$y <- lapply(c(1.5, 1.6), function(R0){ mu <- cm_mu(cm_simulate_season(f, 0.85, R0, 30, 62, c(0, 0, .5))$inc, f, 0.08, 3)
+    y <- mu + rnorm(length(mu), 0, sqrt(mu + mu^2 / 25)); y[y < 0] <- 0; y })
+  cd$rates <- lapply(cd$y, function(y) sweep(y, 2, N3 / settings$rate_per, "/"))
+  grid <- expand.grid(c_by_age = c(FALSE, TRUE), c_by_season = c(FALSE, TRUE), susc_by_age = c(FALSE, TRUE),
+                      b_by_source = c(FALSE, TRUE), I0_by_season = c(FALSE, TRUE))
+  for (i in seq_len(nrow(grid))){
+    s <- settings; for (nm in names(grid)) s[[nm]] <- grid[i, nm]
+    st <- cm_theta_start(cd, s, R0_free = TRUE); th <- st$base
+    n_expected <- 1 + K + (if (s$I0_by_season) K else 0) + 1 + (if (s$c_by_age) 2 else 0) + (if (s$c_by_season) K else 0) +
+      (if (s$susc_by_age) 2 else 0) + (if (s$b_by_source) 2 else 1) + 2                 # log_phi, log_q
+    expect_equal(length(th), n_expected); expect_equal(length(st$jit), n_expected)
+    p <- cm_unpack(th, K, TRUE, s)
+    expect_equal(unname(p$phi), unname(exp(th[["log_phi"]])))                      # phi is read from ITS slot
+    expect_equal(length(p$b), if (s$b_by_source) 2 else 1)
+    expect_true(is.finite(cm_negll(th, cd, f, s, stage = "det")))
+    expect_true(is.finite(cm_negll(th, cd, f, s, stage = "ekf")))
+    if (s$susc_by_age){ th2 <- th; th2[["log2susc_young"]] <- 1; expect_equal(cm_unpack(th2, K, TRUE, s)$sigma, c(2, 1, 1)) }
+    if (s$c_by_age){ th2 <- th; th2[["log2c_elderly"]] <- 1; p2 <- cm_unpack(th2, K, TRUE, s); expect_equal(p2$c_age[3] / p2$c_age[2], 2) }
+    # the prior ignores the unpenalised baseline slots and responds to phi
+    th3 <- th; th3[grep("^log_b", names(th))] <- th3[grep("^log_b", names(th))] + 1
+    expect_equal(cm_logprior(th3, K, TRUE, s), cm_logprior(th, K, TRUE, s))
+    th4 <- th; th4[["log_phi"]] <- th4[["log_phi"]] + 1
+    expect_false(isTRUE(all.equal(cm_logprior(th4, K, TRUE, s), cm_logprior(th, K, TRUE, s))))
+  }
 })

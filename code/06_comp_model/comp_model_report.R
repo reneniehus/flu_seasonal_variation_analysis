@@ -13,6 +13,10 @@
 #   3. Season and country variation?  plot_cm_seasons(fits)  across countries: R0_s by season (one
 #      line per country, the shared-season hypothesis = lines move together), country S0_c with
 #      intervals, attack rates by age x season (tiles), R_eff = R0_s * S0_c.
+#   4. Which age mechanism?     plot_cm_age_experiment(tab)  across countries, from run_age_experiment.R:
+#      the direction of the age misfit under age-invariant reporting, the fitted reporting offsets vs
+#      the fitted susceptibility profile, their likelihoods, and the modelled attack-rate profile by
+#      age against the reporting-independent PHIRST cohort (phirst_attack_by_age()).
 # Each function returns a ggplot (or patchwork) object; save_cm_report() writes them to output/comp_model/.
 
 suppressMessages({library(ggplot2); library(dplyr); library(tidyr)})
@@ -96,10 +100,12 @@ plot_cm_params = function(fit){
   prior_mean[grepl("^log_I0_", nm)] = log(s$I0_fraction); prior_sd[grepl("^log_I0_", nm)] = s$prior_logI0_sd
   prior_mean[grepl("^logc_dev_", nm)] = 0; prior_sd[grepl("^logc_dev_", nm)] = s$prior_logc_season_sd
   prior_mean[grepl("^log2c_", nm)] = 0;    prior_sd[grepl("^log2c_", nm)] = s$prior_logc_age_sd
+  prior_mean[grepl("^log2susc_", nm)] = 0; prior_sd[grepl("^log2susc_", nm)] = s$prior_log2susc_sd
   d = data.frame(param = nm, est = th, lo = th - 1.96 * se, hi = th + 1.96 * se, prior_mean, prior_sd, stringsAsFactors = FALSE) %>%
     mutate(family = case_when(grepl("^log_R0_", param) ~ "season R0 (log)", grepl("^log_I0_", param) ~ "season seed I0 (log; arrival time)",
                               param == "logit_S0" ~ "S0 (logit)",
                               grepl("^logc_dev_", param) ~ "season reporting deviation (log)",
+                              grepl("^log2susc_", param) ~ "age susceptibility (log2, medium = 0)",
                               param %in% c("log_c", "log_b") | grepl("^log2c_|^log_b_", param) ~ "reporting (log; age offsets log2)", TRUE ~ "noise / dispersion (log)"),
            label = sub("^log_R0_", "", param), label = sub("^logit_", "", label), label = sub("^log_", "", label),
            label = factor(label, levels = rev(unique(label))))
@@ -159,6 +165,96 @@ plot_cm_seasons = function(fits){
          x = NULL, y = "exp(delta_s)  (log scale)") + theme_minimal(base_size = 10) +
     theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.subtitle = element_text(size = 8))
   list(R0 = p1, S0 = p2, attack = p3, R_eff = p4, c_season = p5)
+}
+
+# ---- |-4. which age mechanism: the cross-country age experiment (run_age_experiment.R) ----
+# PHIRST (Cohen et al. 2021, Lancet Glob Health 9: e863-74; South Africa 2016-18, household cohort,
+# twice-weekly RT-PCR swabs irrespective of symptoms): influenza infection incidence per 100
+# person-seasons by age, read off the vector data of Figure 2A. 'episodes' = all infection episodes
+# (the stacked bar), 'once' = the '1 episode' segment. Reporting-INDEPENDENT, so it anchors the modelled
+# attack-rate profile by age; the comparison is of RATIOS between age groups (levels differ: dense
+# multi-generational households, low vaccination, HIV), and of a 2-season South African cohort against
+# European averages -- an external check, not a target.
+phirst_attack_by_age = function(){
+  data.frame(band = c("<1", "1-4", "5-12", "13-18", "19-44", "45-64", ">=65"), years = c(1, 4, 8, 6, 26, 20, 15),
+             episodes = c(66.1, 67.4, 50.8, 44.5, 29.5, 29.5, 24.5), once = c(47.2, 55.7, 42.5, 37.5, 26.5, 27.2, 22.3),
+             stringsAsFactors = FALSE)
+}
+# collapsed to the model's groups (young 0-14, medium 15-64, elderly 65+) with years as population weights
+# (the 13-18 band is split 2:4); returns the young/medium and elderly/medium ratios for both readings
+phirst_group_ratios = function(){
+  p = phirst_attack_by_age(); w13 = c(young = 2, medium = 4)
+  grp = function(col){ v = p[[col]]
+    young = (1 * v[1] + 4 * v[2] + 8 * v[3] + w13["young"] * v[4]) / 15
+    medium = (w13["medium"] * v[4] + 26 * v[5] + 20 * v[6]) / 50
+    c(young = unname(young), medium = unname(medium), elderly = v[7]) }
+  e = grp("episodes"); o = grp("once")
+  data.frame(reading = c("episodes", "once"), young_over_medium = c(e["young"] / e["medium"], o["young"] / o["medium"]),
+             elderly_over_medium = c(e["elderly"] / e["medium"], o["elderly"] / o["medium"]), row.names = NULL)
+}
+
+# tab: the merged table of run_age_experiment.R (one row per country x variant)
+plot_cm_age_experiment = function(tab){
+  vlev = c("A_none", "B_reporting", "C_susceptibility", "D_both"); tab = tab %>% mutate(variant = factor(variant, levels = vlev))
+  glev = c("young", "elderly"); gcol = c(young = "#1b9e77", elderly = "#d95f02")
+  cs = sort(unique(tab$country)); ccol = setNames(grDevices::hcl.colors(length(cs), "Dark 3"), cs)   # one colour per country (12 > Dark2's 8)
+  # (a) the direction of the age misfit under age-invariant reporting, relative to the medium group
+  mis = tab %>% filter(variant == "A_none") %>%
+    transmute(country, young = log2(ratio_young / ratio_medium), elderly = log2(ratio_elderly / ratio_medium)) %>%
+    pivot_longer(c(young, elderly), names_to = "group", values_to = "log2") %>% mutate(group = factor(group, levels = glev))
+  ord = mis %>% filter(group == "young") %>% arrange(log2) %>% pull(country)
+  p1 = ggplot(mis, aes(log2, factor(country, levels = ord), colour = group)) + geom_vline(xintercept = 0, colour = "grey60") +
+    geom_point(size = 2.5) + scale_colour_manual(values = gcol, name = NULL) +
+    labs(title = "Age misfit under age-invariant reporting (variant A): observed / modelled cumulative ILI+, relative to the medium group",
+         subtitle = "> 0 = the group is observed MORE than the contact structure alone predicts. The same sign in every country = an age effect the model lacks everywhere (biology or universal care-seeking); mixed signs = surveillance-specific.",
+         x = "log2( (obs/model)_group / (obs/model)_medium )", y = NULL) + theme_minimal(base_size = 10) +
+    theme(legend.position = "top", plot.subtitle = element_text(size = 7.5))
+  # (b) the fitted age effects: reporting offsets (B) and susceptibility profile (C), with Laplace 95%
+  eff = bind_rows(
+    tab %>% filter(variant == "B_reporting") %>% transmute(country, mechanism = "reporting offset (B): ILI+ per infection vs medium",
+      young = log2(c_young_rel), elderly = log2(c_elderly_rel), se_young = se_log2c_young, se_elderly = se_log2c_elderly),
+    tab %>% filter(variant == "C_susceptibility") %>% transmute(country, mechanism = "susceptibility (C): per-contact susceptibility vs medium",
+      young = log2(susc_young), elderly = log2(susc_elderly), se_young = se_log2susc_young, se_elderly = se_log2susc_elderly)) %>%
+    pivot_longer(c(young, elderly), names_to = "group", values_to = "log2") %>%
+    mutate(se = ifelse(group == "young", se_young, se_elderly), group = factor(group, levels = glev))
+  p2 = ggplot(eff, aes(log2, factor(country, levels = ord), colour = group)) + geom_vline(xintercept = 0, colour = "grey60") +
+    annotate("rect", xmin = -1.96, xmax = 1.96, ymin = -Inf, ymax = Inf, fill = "#8da0cb", alpha = 0.15) +
+    geom_pointrange(aes(xmin = log2 - 1.96 * se, xmax = log2 + 1.96 * se), position = position_dodge(width = 0.5), size = 0.3) +
+    facet_wrap(~ mechanism) + scale_colour_manual(values = gcol, name = NULL) +
+    labs(title = "The fitted age effect under each mechanism (log2 vs the medium group; Laplace 95%; band = prior 95%)",
+         x = "log2 effect", y = NULL) + theme_minimal(base_size = 10) + theme(legend.position = "top")
+  # (c) likelihood: how much each mechanism improves on A (same parameter count for B and C)
+  lik = tab %>% group_by(country) %>% mutate(d_ekf = negll_ekf - negll_ekf[variant == "A_none"], d_det = negll_stage1 - negll_stage1[variant == "A_none"]) %>%
+    ungroup() %>% filter(variant != "A_none")
+  p3 = ggplot(lik, aes(variant, -d_ekf, colour = country, group = country)) + geom_hline(yintercept = 0, colour = "grey60") +
+    geom_line(alpha = 0.6) + geom_point(size = 2) + scale_colour_manual(values = ccol, name = NULL) +
+    labs(title = "Likelihood gain over variant A (EKF stage; nats)", subtitle = "B and C add two parameters each, D four; a gain of ~2 nats per parameter is what noise buys.",
+         x = NULL, y = "negll(A) - negll(variant)") + theme_minimal(base_size = 10) + theme(plot.subtitle = element_text(size = 8))
+  # (d) the modelled attack-rate profile by age under each variant against PHIRST
+  ph = phirst_group_ratios()
+  att = tab %>% transmute(country, variant, `young / medium` = attack_young / attack_medium, `elderly / medium` = attack_elderly / attack_medium) %>%
+    pivot_longer(c(`young / medium`, `elderly / medium`), names_to = "ratio", values_to = "value") %>%
+    mutate(ratio = factor(ratio, levels = c("young / medium", "elderly / medium")))
+  ref = data.frame(ratio = factor(rep(c("young / medium", "elderly / medium"), each = 2), levels = c("young / medium", "elderly / medium")),
+                   reading = rep(ph$reading, 2), value = c(ph$young_over_medium, ph$elderly_over_medium))
+  p4 = ggplot(att, aes(variant, value, colour = country, group = country)) +
+    geom_hline(data = ref, aes(yintercept = value, linetype = reading), colour = "black") +
+    geom_line(alpha = 0.6) + geom_point(size = 2) + facet_wrap(~ ratio, scales = "free_y") + scale_colour_manual(values = ccol, name = NULL) +
+    scale_linetype_manual(values = c(episodes = "dashed", once = "dotted"), name = "PHIRST (South Africa)") +
+    labs(title = "Modelled attack rate by age relative to the medium group, per variant, against the reporting-independent PHIRST profile",
+         subtitle = "PHIRST Figure 2A collapsed to the model's groups: young/medium 1.65-1.80, elderly/medium 0.80 (dotted = '1 episode', dashed = all episodes).",
+         x = NULL, y = "attack-rate ratio") + theme_minimal(base_size = 10) + theme(plot.subtitle = element_text(size = 8), legend.position = "right")
+  list(misfit = p1, effects = p2, likelihood = p3, attack = p4)
+}
+
+save_cm_age_experiment = function(tab, dir = "output/comp_model/age_experiment"){
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE); ps = plot_cm_age_experiment(tab)
+  ggsave(file.path(dir, "age_misfit_variantA.png"), ps$misfit, width = 10, height = 4.5, dpi = 110)
+  ggsave(file.path(dir, "age_effects_B_vs_C.png"), ps$effects, width = 11, height = 4.5, dpi = 110)
+  ggsave(file.path(dir, "age_likelihood_gain.png"), ps$likelihood, width = 7, height = 4.5, dpi = 110)
+  ggsave(file.path(dir, "age_attack_profile_vs_PHIRST.png"), ps$attack, width = 11, height = 4.5, dpi = 110)
+  write.csv(tab, file.path(dir, "age_experiment.csv"), row.names = FALSE)
+  invisible(dir)
 }
 
 # ---- |-write the per-country and cross-country figures ----

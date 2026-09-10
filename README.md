@@ -122,6 +122,8 @@ code/06_comp_model/            the age x vaccination compartmental model (branch
                                comp_model_core.R (R reference) + comp_model_core.cpp (identical
                                C++ engine), comp_model_data.R, comp_model_fit.R (two-stage EKF),
                                comp_model_report.R (eyeballing figures), run_comp_model.R,
+                               run_age_experiment.R (age-specific reporting vs susceptibility,
+                               12 countries, against the PHIRST attack-rate profile),
                                comp_model_joint.R + run_comp_model_joint.R (shared season R0)
 code/05_analysis/              the driver analysis: analysis_helpers.R (shared Gibbs samplers, rhat,
                                VE-vs-dominant rule), prepare_descriptors.R, dominant_subtype.R,

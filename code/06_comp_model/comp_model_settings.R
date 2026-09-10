@@ -45,14 +45,24 @@ comp_model_settings = function(){
   # across its seasons; across countries by pooling R0_s).
   p$S0_by_season    = FALSE       # [owner] one S0 per country, shared across seasons (E2)
   p$S0_by_age       = FALSE       # [proposal] ... and shared across age groups (E2)
-  p$I0_fraction     = 1e-5        # [proposal] the seed in every age group on season day 1 (E3); the centre of the per-season prior below
+  # AGE-SPECIFIC SUSCEPTIBILITY (the alternative to age-specific reporting): relative susceptibility
+  # sigma_a for young and elderly (medium = 1), shared across seasons within a country. It enters the
+  # force of infection as row scaling of the contact matrix, diag(sigma) %*% Cn, RENORMALISED to
+  # spectral radius 1 so R0_s keeps its meaning: sigma redistributes WHO gets infected (attack rates by
+  # age), it does not change the overall transmissibility. Discriminates from reporting offsets (F2)
+  # through the dynamics -- and through external attack-rate profiles (PHIRST, South Africa).
+  p$susc_by_age     = FALSE       # [open] fit log2 sigma_young, log2 sigma_elderly; prior N(0, 1)
+  p$prior_log2susc_sd = 1
+  p$I0_fraction     = 10^-6.5     # [owner, 2026-09] centre of the per-season seed prior (E3); recentred from 1e-5 after 29% of the
+                                  # fitted seeds (5 countries, 35 seasons; median 10^-6.4, range 10^-8.8..10^-3.6) fell below
+                                  # the old prior's lower 2.5% bound -- late waves need small seeds
   # SEASON ARRIVAL TIME (E3, evidence: the Danish fit with a fixed seed peaks ~12 weeks too early in
   # every season and the filter has to abandon the SIR). With S0 shared across seasons the seed size is
   # the only smooth handle on WHEN a season arrives: I0_s = I0 * exp(delta_s), delta_s ~ N(0, sd) per
   # season. It shifts the epidemic by delta_s / r days at growth rate r and leaves r = gamma*(R0_s*S0_c-1)
   # -- hence the identification of R0_s and S0_c -- untouched. (The Stan model's disabled i_season term.)
   p$I0_by_season    = TRUE        # [proposal] per-season seed size (arrival time); FALSE = the fixed seed of E3 as first agreed
-  p$prior_logI0_sd  = 2.5         # [proposal] wide: a factor ~12 at 1 sd, i.e. +/- ~5 weeks of arrival at r = 0.07/day
+  p$prior_logI0_sd  = 3           # [owner, 2026-09] wide: 95% band 10^-9.1 .. 10^-3.9 covers every fitted seed so far
   p$season_start_monthday = "-08-01"   # [data] as the panel
   p$reset_each_season = TRUE      # [stan] compartments reset at every season start; no immunity carry-over (E1)
 

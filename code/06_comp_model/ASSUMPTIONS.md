@@ -87,6 +87,23 @@ assumptions of the previous Stan model except where the owner has explicitly cha
 - C5 `[stan]` Time stepping: forward Euler on a DAILY grid (`dt = 1 day`, `n_sub = 1` as the Stan runner
   used); observations are weekly sums. Sub-daily steps are a settings switch.
 - C6 `[stan]` The vaccinated infectious are `(1 - ve_spread)` as infectious as the unvaccinated.
+- C7 `[open, 2026-09-10]` AGE-SPECIFIC SUSCEPTIBILITY as the mechanistic alternative to age-specific
+  reporting (F2): relative susceptibility `sigma_a` for the young and the elderly (medium = 1; per
+  country, shared across seasons; settings `susc_by_age`, prior `log2 sigma ~ N(0, 1)`). It enters the
+  force of infection as ROW scaling of the contact matrix, `diag(sigma) %*% Cn`, RENORMALISED to
+  spectral radius 1, so `R0_s` keeps its meaning (C3): sigma redistributes WHO gets infected -- the
+  attack-rate profile by age -- without changing the overall transmissibility. (The unnormalised
+  product would change R0 by rho(diag(sigma) Cn), a pure artefact of the profile.) Contrast with the
+  reporting offsets `2^off_a` of F2, which leave the dynamics untouched and rescale the observed
+  ILI+ per infection. The two are distinguished by (i) the DYNAMICS -- susceptibility changes each
+  group's wave (timing, size, its share of transmission) whereas an offset only rescales it -- and
+  (ii) EXTERNAL attack-rate evidence: a reporting-independent prospective cohort (PHIRST, South Africa,
+  Cohen et al. 2021, Lancet Glob Health, Figure 2A) finds influenza infection incidence per 100
+  person-seasons of 66 (<1 y), 67 (1-4), 51 (5-12), 45 (13-18), 30 (19-44), 30 (45-64), 25 (>= 65):
+  young > adult > elderly. The modelled attack-rate profile under each option is compared with this
+  ordering in the age experiment (decisions.md, 2026-09). Cross-country logic of that experiment: a
+  susceptibility effect should give the SAME direction of over/under-prediction by age in every
+  country under age-invariant reporting; reporting differences would vary by surveillance system.
 
 ## 4. Vaccination
 
@@ -122,9 +139,13 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   initial simplex for all seasons, ages and -- per fit -- one country; this design keeps the shared
   initial state per country and adds the season factor on transmission instead of the disabled
   `i_season`/`r_season` initial-state deviations.
-- E3 `[proposal, revised 2026-09-10 on evidence]` Seed: `I0_s = 1e-5 * exp(delta_s)` of each age group
-  on day 1 of the season, with a PER-SEASON deviation `delta_s ~ N(0, 2.5)` (settings `I0_by_season`,
-  `prior_logI0_sd`). Why not the fixed seed first agreed: with `S0_c` shared across seasons (E2) the
+- E3 `[proposal, revised 2026-09-10 on evidence; prior recentred by the owner]` Seed:
+  `I0_s = 10^-6.5 * exp(delta_s)` of each age group on day 1 of the season, with a PER-SEASON deviation
+  `delta_s ~ N(0, 3)` (settings `I0_fraction`, `I0_by_season`, `prior_logI0_sd`). The centre was 1e-5
+  with sd 2.5 until the five-country fits (35 seasons) put 29% of the fitted seeds below that prior's
+  lower 2.5% bound (median 10^-6.4, range 10^-8.8 .. 10^-3.6): LATE waves need SMALL seeds, and a
+  prior that excludes them delays every late season. The 95% band of the new prior, 10^-9.1 .. 10^-3.9,
+  covers every fitted seed so far. Why not the fixed seed first agreed: with `S0_c` shared across seasons (E2) the
   fixed 1 August seed left the model no handle on WHEN a season arrives, and the first Danish fit
   showed it -- the deterministic SIR peaked around week 15-22 in every season against observed peaks
   at week 30-35, and the filter could only follow the data by abandoning the SIR (q = 0.32, phi = 1).
@@ -214,6 +235,11 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   (y ~ N(mu, mu + mu^2/phi), no filter, multi-start); stage 2 starts the EKF there. Stage 1 is the
   well-posed objective that pins timing and shape; stage 2 is the noise-aware refinement. Both
   optima are kept in the fit object and drawn in the fit figure (dotted = stage 1).
+- G5 `[proposal]` After each Kalman update the state is clamped to [0, 1] with the floor at EXACTLY 0,
+  as in the deterministic step. (An earlier positive floor of 1e-12 re-seeded every compartment every
+  week -- the vaccinated infectious before the pulse in particular -- and made the filter drift off the
+  deterministic model by ~1e-12/I0 per week; noticeable once seeds of 10^-8 are admitted. The core
+  test now requires the zero-noise EKF to reproduce the deterministic model to 1e-9 at a 1e-9 seed.)
 
 ## 8. Priors (as optim penalties on transformed parameters)
 
@@ -254,7 +280,43 @@ the source alignment).
 
 ## 11. Open decisions (`[open]`)
 
-1. Age-specific `S0` modifier (E2) -- start shared, revisit after the first fits.
-2. Per-season drift of the reporting proportion `c` (F2).
+1. The AGE MECHANISM: age-specific reporting offsets (F2, default ON) versus age-specific
+   susceptibility (C7) -- decided on the cross-country age experiment and the PHIRST attack-rate
+   profile (decisions.md, 2026-09). An age-specific `S0` modifier (E2) is the third reading of the
+   same evidence (initial immunity by age rather than susceptibility per contact); not fitted yet.
+2. Per-season drift of the reporting proportion `c` (F2) -- ON by default on Danish evidence; the
+   joint stage decides whether the season deviation is shared across countries.
 3. Prior widths in H1-H3 and the process-noise prior (G2).
 4. Season-specific VE from the CSV vs the fixed notes values (D3).
+
+## 12. The parameters in words (a glossary for reading the fit figures)
+
+- `c` (F2) -- the REPORTING proportion: expected ILI+ per infection, i.e. P(ILI consultation | infection)
+  x P(sampled and tested) x positivity, on the ILI+ rate scale of the panel. Per country; multiplied by
+  the age offsets `2^off_a` (young, elderly vs the medium reference) and the season deviation
+  `exp(delta_s)`. It is what turns modelled infections into the observed series, so a country with
+  low `c` may have more infections than a country with a higher curve.
+- `b` (F2) -- the off-season BASELINE of the observed series: ILI+ per 100 000 that is NOT influenza
+  infections in the model's sense (residual positivity in ILI from other causes, misclassification,
+  the reconstruction floor of the stitched series). There is one `b` per DATA SOURCE (`b_RespiCompass`,
+  `b_ERVISS`) because the two sources have different floors: RespiCompass ILI+ is exactly zero in
+  weeks without detections, the ERVISS reconstruction sits on a small positive floor -- one shared
+  `b` cannot be right for both and the mismatch was absorbed by phi.
+- `phi` (F3) -- OBSERVATION (measurement) noise: the overdispersion of the weekly ILI+ around the
+  model's expected value, `Var = mu + mu^2/phi`, so 1/sqrt(phi) is the coefficient of variation at
+  large counts (phi = 4 means +/- 50%). Mechanistically it is everything that scrambles the
+  MEASUREMENT of a given week's infections without changing the epidemic: sentinel sampling, the
+  number of swabs tested, holiday reporting, weekly positivity sampling error in a small
+  denominator, age-band reallocation between sources. It does NOT propagate: a noisy week leaves no
+  trace on the next week's state.
+- `q` (G2) -- PROCESS noise: the weekly wiggle of the latent epidemic itself, a multiplicative sd of
+  `q x I` on the infected fractions (fixed at 5%). Mechanistically it stands for what the SIR leaves
+  out of the TRANSMISSION process: school holidays and weather changing contacts for a week,
+  importations and spatial heterogeneity (a second city taking off), a co-circulating strain, the
+  stochasticity of a small number of chains early in the season. Unlike phi it PROPAGATES: a
+  perturbation of I this week is carried forward by the dynamics and changes every later week -- which
+  is why the filter must be kept tight (G2-G3): a loose q lets the filter carry the wave by state
+  corrections and the mechanistic parameters stop mattering.
+- `S0` (E2) -- the fraction of each age group susceptible at the season start (per country, shared
+  across seasons and ages); `R0_s` (C4) -- the season's transmissibility at full susceptibility given
+  the age mixing; `I0_s` (E3) -- the season's seed, i.e. its ARRIVAL time.

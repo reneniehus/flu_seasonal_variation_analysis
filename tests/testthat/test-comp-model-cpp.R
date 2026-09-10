@@ -9,6 +9,7 @@ source(here::here("code/06_comp_model/contact_matrix.R"))
 source(here::here("code/06_comp_model/comp_model_settings.R"))
 source(here::here("code/06_comp_model/comp_model_core.R"))
 source(here::here("code/06_comp_model/comp_model_cpp.R"))
+source(here::here("code/06_comp_model/comp_model_fit.R"))       # cm_b_season, cm_fixed_sigma (the per-season pieces)
 withr::with_dir(here::here(), cm_load_cpp())
 
 settings <- comp_model_settings()
@@ -50,10 +51,16 @@ test_that("R and C++ engines agree on real Danish data across all seasons", {
   skip_if_not(file.exists(here::here("output/comp_model/fit_DK.rds")))
   fit <- readRDS(here::here("output/comp_model/fit_DK.rds"))
   fd <- cm_fixed(fit$Cn, fit$N, fit$settings); p <- fit$params
+  if (!is.null(p$sigma)) fd <- cm_fixed_sigma(fd, p$sigma)            # age-susceptibility profile, if fitted
   for (s in seq_along(fit$seasons)){
     vf <- c(0, 0, fit$vax$coverage[s])
-    r <- cm_ekf_season(fit$y[[s]], fd, p$S0, p$R0[s], p$c, p$b, p$phi, p$q, 62, vf)
-    k <- cm_ekf_season_engine(fit$y[[s]], fd, p$S0, p$R0[s], p$c, p$b, p$phi, p$q, 62, vf, engine = "cpp")
+    # per-season pieces of the current parameter layout: c is K x A (season deviation x age offsets),
+    # b is per data source, I0 per season -- exactly what cm_negll hands the engines
+    cs <- if (is.matrix(p$c)) p$c[s, ] else p$c
+    bs <- cm_b_season(p, fit, s)
+    I0 <- if (length(p$I0) > 1) p$I0[s] else p$I0
+    r <- cm_ekf_season(fit$y[[s]], fd, p$S0, p$R0[s], cs, bs, p$phi, p$q, 62, vf, I0 = I0)
+    k <- cm_ekf_season_engine(fit$y[[s]], fd, p$S0, p$R0[s], cs, bs, p$phi, p$q, 62, vf, I0 = I0, engine = "cpp")
     expect_lt(abs(r$loglik - k$loglik) / abs(r$loglik), 1e-10)
     expect_lt(rel(k$mu_pred, r$mu_pred), 1e-10)
   }

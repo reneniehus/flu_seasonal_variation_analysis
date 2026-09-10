@@ -154,7 +154,10 @@ cm_ekf_season = function(y, f, S0, R0, c, b, phi, q, vax_day = NA, vax_frac = NU
       P = (diag(L$n) - K %*% H) %*% Ppr
       ll = ll - 0.5 * (2 * sum(log(diag(cS))) + sum(innov * Sinv_innov) + length(ok) * log(2 * pi))
     } else { x = xpr; P = Ppr }
-    x[c(L$S_u, L$I_u, L$S_v, L$I_v)] = pmin(pmax(x[c(L$S_u, L$I_u, L$S_v, L$I_v)], 1e-12), 1)
+    # clamp the UPDATED state to [0, 1] exactly as the deterministic step does. A positive floor (an
+    # earlier 1e-12) would re-seed every compartment every week -- I_v before the vaccination pulse
+    # in particular -- and make the EKF drift off the deterministic model by ~1e-12/I0 per week
+    x[c(L$S_u, L$I_u, L$S_v, L$I_v)] = pmin(pmax(x[c(L$S_u, L$I_u, L$S_v, L$I_v)], 0), 1)
     I_filt[t, ] = x[L$I_u] + x[L$I_v]; S_filt[t, ] = x[L$S_u] + x[L$S_v]
   }
   list(loglik = ll, mu_pred = mu_pred, I = I_filt, S = S_filt)
