@@ -240,6 +240,7 @@ plot_cm_age_experiment = function(tab){
   p4 = ggplot(att, aes(variant, value, colour = country, group = country)) +
     geom_hline(data = ref, aes(yintercept = value, linetype = reading), colour = "black") +
     geom_line(alpha = 0.6) + geom_point(size = 2) + facet_wrap(~ ratio, scales = "free_y") + scale_colour_manual(values = ccol, name = NULL) +
+    scale_y_log10(breaks = c(0.1, 0.2, 0.3, 0.5, 0.8, 1, 1.5, 2, 3, 5)) +
     scale_linetype_manual(values = c(episodes = "dashed", once = "dotted"), name = "PHIRST (South Africa)") +
     labs(title = "Modelled attack rate by age relative to the medium group, per variant, against the reporting-independent PHIRST profile",
          subtitle = "PHIRST Figure 2A collapsed to the model's groups: young/medium 1.65-1.80, elderly/medium 0.80 (dotted = '1 episode', dashed = all episodes).",
@@ -282,10 +283,10 @@ save_cm_susc_grid = function(res, dir = "output/comp_model/susc_grid"){
 
 save_cm_age_experiment = function(tab, dir = "output/comp_model/age_experiment"){
   dir.create(dir, showWarnings = FALSE, recursive = TRUE); ps = plot_cm_age_experiment(tab)
-  ggsave(file.path(dir, "age_misfit_variantA.png"), ps$misfit, width = 10, height = 4.5, dpi = 110)
+  ggsave(file.path(dir, "age_misfit_variantA.png"), ps$misfit, width = 12.5, height = 4.8, dpi = 110)
   ggsave(file.path(dir, "age_effects_B_vs_C.png"), ps$effects, width = 11, height = 4.5, dpi = 110)
   ggsave(file.path(dir, "age_likelihood_gain.png"), ps$likelihood, width = 7, height = 4.5, dpi = 110)
-  ggsave(file.path(dir, "age_attack_profile_vs_PHIRST.png"), ps$attack, width = 11, height = 4.5, dpi = 110)
+  ggsave(file.path(dir, "age_attack_profile_vs_PHIRST.png"), ps$attack, width = 12, height = 4.8, dpi = 110)
   write.csv(tab, file.path(dir, "age_experiment.csv"), row.names = FALSE)
   invisible(dir)
 }

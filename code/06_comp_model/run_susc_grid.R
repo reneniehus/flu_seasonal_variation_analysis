@@ -52,6 +52,8 @@ collect_susc_grid = function(dir = susc_grid_dir){
   fs = list.files(dir, "^susc_grid_.*\\.csv$", full.names = TRUE)
   tab = do.call(rbind, lapply(fs, read.csv, stringsAsFactors = FALSE))
   tab = tab[!duplicated(tab[, c("country", "variant")], fromLast = TRUE), ]
+  n_pts = length(unique(paste(tab$susc_young, tab$susc_elderly)))
+  tab = tab %>% group_by(country) %>% filter(n() == n_pts) %>% ungroup()          # the profile sums the SAME countries at every point
   prof = tab %>% group_by(susc_young, susc_elderly) %>% summarise(n = n(), negll_ekf = sum(negll_ekf), negll_stage1 = sum(negll_stage1), .groups = "drop") %>%
     mutate(gain_ekf = negll_ekf[susc_young == 1 & susc_elderly == 1] - negll_ekf, gain_stage1 = negll_stage1[susc_young == 1 & susc_elderly == 1] - negll_stage1)
   list(tab = tab, profile = prof)
