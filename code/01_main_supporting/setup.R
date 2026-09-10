@@ -121,6 +121,16 @@ EU_short <- function(name_long,greece="GR" # or "EL
   
   return(name_short)
 }
+# inverse mapping (short -> long); used by the compartmental model's data builder, whose contact
+# matrices and population pyramids are keyed by long country names
+EU_long <- function(name_short, greece="GR"){
+  name_long = name_short
+  for (i in 1:length(name_long)) {
+    if (name_short[i]=="EL"&greece=="EL") name_short[i]<-"GR"
+    name_long[i] <- countries[which(countries_short%in%name_short[i])]
+  }
+  return(name_long)
+}
 # very end: timing
 end_time <- Sys.time()
 pr=paste("> Setup script run:",round(end_time - start_time,2),"sec \n"); cat(green(pr))

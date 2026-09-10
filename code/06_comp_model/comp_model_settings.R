@@ -39,7 +39,12 @@ comp_model_settings = function(){
   p$vax_groups      = "elderly"   # [stan][data] only the elderly are vaccinated; young/medium coverage = 0 (D2)
 
   # ---- |-seasons and initial conditions (E1-E4) ----
-  p$S0_by_age       = FALSE       # [proposal] one S0 per country-season, shared across age groups (E2)
+  # THE TWO-WAY DESIGN (owner, 2026-09-10): S0 is per COUNTRY and shared across seasons; R0 is per
+  # SEASON and shared across countries. The rise rate of country-season (c,s) is gamma*(R0_s*S0_c - 1),
+  # a season factor times a country factor, so both are identified (per country once S0_c is shared
+  # across its seasons; across countries by pooling R0_s).
+  p$S0_by_season    = FALSE       # [owner] one S0 per country, shared across seasons (E2)
+  p$S0_by_age       = FALSE       # [proposal] ... and shared across age groups (E2)
   p$I0_fraction     = 1e-5        # [proposal] fixed seed in every age group on season day 1 (E3)
   p$season_start_monthday = "-08-01"   # [data] as the panel
   p$reset_each_season = TRUE      # [stan] compartments reset at every season start; no immunity carry-over (E1)
@@ -70,9 +75,11 @@ comp_model_settings = function(){
   # base R, i.e. NOT feasible. In Rcpp the same likelihood is ~0.5 ms per country-season, ~0.1 s joint,
   # ~1 min per gradient, hours per joint fit -- feasible, and exact gradients (TMB/autodiff) would make
   # it minutes. So: base R for the reference model and the per-country stage; Rcpp for the joint fit.
-  p$stage           = "per_country"   # "per_country" (R0_s fixed at R0_reference) | "joint" (R0_s free, shared)
+  p$stage           = "per_country"   # "per_country" (S0_c + regularised R0_{c,s} per country) | "joint" (R0_s shared across countries)
   p$n_starts        = 4
-  p$optim_maxit     = 200
+  p$optim_maxit     = 300
+  p$prior_logc      = NULL        # reporting proportion c: unpenalised (data-scale)
+  p$prior_logb      = NULL        # baseline b (rate per 100 000): unpenalised
 
   p
 }

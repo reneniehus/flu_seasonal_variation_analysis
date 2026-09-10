@@ -135,17 +135,21 @@
 }
 
 # ---- |-multi-start BFGS: jittered restarts, keep the best finite optimum ----
-.fit_multistart = function(base, jit_sd, negll, negll_args, n_starts, seed, method_name){
+# cores > 1 runs the starts in parallel (forked processes; the jittered starts are drawn up front in
+# the same RNG order, so the start points -- and therefore the result -- are identical to the
+# sequential run). maxit: optim iteration cap.
+.fit_multistart = function(base, jit_sd, negll, negll_args, n_starts, seed, method_name,
+                           cores = 1, maxit = 200){
   set.seed(seed)
+  starts = lapply(seq_len(n_starts), function(s) base + if (s == 1) 0 else rnorm(length(base), 0, jit_sd))
+  run_one = function(start) tryCatch(
+    do.call(optim, c(list(par = start, fn = negll), negll_args,
+                     list(method = "BFGS", control = list(maxit = maxit, reltol = 1e-8)))),
+    error = function(e) NULL)
+  fits = if (cores > 1) parallel::mclapply(starts, run_one, mc.cores = min(cores, n_starts)) else lapply(starts, run_one)
   best = NULL
-  for (s in seq_len(n_starts)){
-    start = base + if (s == 1) 0 else rnorm(length(base), 0, jit_sd)
-    fit = tryCatch(
-      do.call(optim, c(list(par = start, fn = negll), negll_args,
-                       list(method = "BFGS", control = list(maxit = 200, reltol = 1e-8)))),
-      error = function(e) NULL)
-    if (!is.null(fit) && is.finite(fit$value) && (is.null(best) || fit$value < best$value)) best = fit
-  }
+  for (fit in fits)
+    if (!is.null(fit) && !inherits(fit, "try-error") && is.finite(fit$value) && (is.null(best) || fit$value < best$value)) best = fit
   if (is.null(best)) stop(sprintf("%s: all optim starts failed", method_name))
   best
 }

@@ -77,10 +77,13 @@ assumptions of the previous Stan model except where the owner has explicitly cha
 - C4 `[owner]` `R0_s` varies BY SEASON (different dominant subtypes carry different transmission
   potential) and is SHARED ACROSS COUNTRIES; prior: `log(R0_s) ~ N(log 1.5, 0.05)` `[proposal]`,
   i.e. a strong pull to 1.5 with ~10% spread at 2 sd, "to ease fitting few data".
-  Identifiability note: within ONE country-season, `R0_s` and the susceptibility `S0` trade off almost
-  perfectly (both set the rise rate `gamma*(R0_s*S0 - 1)`; only the wave shape separates them,
-  weakly). `R0_s` is identified through POOLING across countries plus the prior. Per-country test
-  fits therefore keep `R0_s` fixed at 1.5; the joint fit frees it.
+  Identifiability (the two-way design, owner decision 2026-09-10): the initial susceptibility is
+  per COUNTRY and shared across seasons (`S0_c`, see E2), so the rise rate of country-season (c, s)
+  is `gamma*(R0_s * S0_c - 1)`: a season factor times a country factor. Within one country the
+  per-season `R0_{c,s}` IS identified once `S0_c` is shared across its seasons, so the per-country
+  stage fits `S0_c` plus regularised per-season `R0_{c,s}` (a diagnostic of how season effects look
+  before pooling); the joint stage then pools `R0_s` across countries. (Had `S0` been per
+  country-season, `R0_s` and `S0[c,s]` would trade off almost perfectly.)
 - C5 `[stan]` Time stepping: forward Euler on a DAILY grid (`dt = 1 day`, `n_sub = 1` as the Stan runner
   used); observations are weekly sums. Sub-daily steps are a settings switch.
 - C6 `[stan]` The vaccinated infectious are `(1 - ve_spread)` as infectious as the unvaccinated.
@@ -109,13 +112,16 @@ assumptions of the previous Stan model except where the owner has explicitly cha
 - E1 `[stan]` Each season (1 Aug - 31 Jul) is an independent epidemic: at the season start the
   compartments are RESET to the initial state; natural immunity does not carry over between seasons
   (the previous season's attack rate enters only through whatever the fitted `S0` absorbs).
-- E2 `[owner][proposal]` What varies per season: the initial susceptibility `S0[c, s]` per COUNTRY-SEASON
-  (the project's core quantity; interpreted as a within-country ranking, not an absolute level) and
-  the shared `R0_s`. `[proposal]` One `S0` per country-season shared across the three age groups
-  (initial R fraction = 1 - S0 - I0 in every group); an age-specific modifier is a later extension.
-  (The Stan model as committed had ONE initial simplex for all seasons and ages, its per-season
-  deviations `i_season`/`r_season` being disabled -- so the Stan runs could not express between-season
-  susceptibility differences at all; this model restores what that code intended.)
+- E2 `[owner]` What varies where: the initial susceptibility `S0_c` is per COUNTRY and SHARED ACROSS
+  SEASONS (and across the three age groups: initial R fraction = 1 - S0_c - I0 in every group; an
+  age-specific modifier is a later extension). Between-season variation within a country is carried
+  by the season transmissibility `R0_s` (shared across countries), the vaccination schedule, and the
+  process noise -- NOT by a per-season susceptibility. (The per-season susceptibility remains the
+  job of the single-population susceptibility methods; this model asks how much of the season
+  variation a Europe-wide transmissibility factor explains.) The Stan model as committed had ONE
+  initial simplex for all seasons, ages and -- per fit -- one country; this design keeps the shared
+  initial state per country and adds the season factor on transmission instead of the disabled
+  `i_season`/`r_season` initial-state deviations.
 - E3 `[proposal]` Seed: `I0 = 1e-5` of each age group, fixed, planted on day 1 of the season (as the
   susceptibility methods do; `decisions.md`). With I0 and the seed day fixed, onset timing is carried
   entirely by the growth rate, which is what identifies `S0`. (The Stan model fitted a shared initial
@@ -138,18 +144,36 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   `[open]` whether `c` may drift by season (a weak per-season deviation, as the disabled Stan
   `prop_ili_season` intended).
 - F3 `[stan][proposal]` Scale: ILI+ rates per 100 000 of the age group are converted to COUNTS via
-  `rate * pop_a / 1e5` (as `make_stan_list()` did) so that the negative-binomial-like variance
-  `Var = mu + mu^2/phi` is on a count scale; the Kalman innovation uses this variance with a Gaussian
-  innovation likelihood (the EKF's prediction-error decomposition; the exact NB2 of the Stan model is
-  not available inside a Kalman filter). Missing weeks are skipped (no update), not zero-filled.
+  `rate * pop_a / 1e5` -- with EACH age group's own population (the legacy `make_stan_list()` indexed
+  `pop_age_group[1,]`, i.e. scaled every age group by the 0-4 population; a bug, not replicated) --
+  so that the negative-binomial-like variance `Var = mu + mu^2/phi` is on a count scale; the Kalman
+  innovation uses this variance with a Gaussian innovation likelihood (the EKF's prediction-error
+  decomposition; the exact NB2 of the Stan model is not available inside a Kalman filter). The
+  conversion is a SCALE device: the reporting proportion `c` absorbs it, so countries whose ILI rate
+  is per 100 consultations (CY, LU, MT, x1000 in the panel) or per 100 000 consultations (FI) are
+  usable, only their count-scale variance is nominal. Missing weeks are skipped (no update), not
+  zero-filled. Counts are not rounded (the innovation is Gaussian).
 - F4 `[owner]` NO likelihood weights (`weight_obs_epi`) and NO separate cumulative-burden likelihood
   term (`n_season_cum_fit`, `sigma_cum_ili`): the weekly likelihood already contains the season's
   cumulative burden, and down-weighting the weekly points by 0.1 to balance a duplicated term
   tempered the likelihood (inflating uncertainty ~sqrt(10)) without a principled basis.
 - F5 `[data]` RespiCompass (<= 2023/24) and ERVISS (>= 2023/24) age-specific ILI+ are on one scale via
-  the per-country alignment factor of the panel stitch; per-100-consultations countries (CY, LU, MT)
-  are scaled x1000. `[data]` Age-complete series (>= 15 positive weeks in all four bands) exist for
-  all 8 panel seasons in DK, EE, ES, FR, NO and for >= 6 seasons in 12 countries.
+  the per-country alignment factor of the panel stitch (estimated on the age TOTALS and applied to
+  every band); per-100-consultations countries (CY, LU, MT) are scaled x1000. Country-seasons enter
+  if and only if they are in the committed panel (the total-based inclusion rule); a band with
+  missing weeks is simply not updated in those weeks. `[data]` Age-complete series (>= 15 positive
+  weeks in all four bands) exist for all 8 panel seasons in DK, EE, ES, FR, NO and for >= 6 seasons
+  in 12 countries; HU, GR and LU report age totals only in both sources and cannot be age-structured.
+- F6 `[data]` Vaccination coverage for the young and medium groups is assumed ZERO. A sparse
+  non-elderly coverage file exists (`data/vax_flu_history_all.csv`, loaded as
+  `data$vax$data_vax_history_all` but consumed by nothing: an Italian age ladder, NO/SE 0-17 and
+  18-64, 18+ for nine countries in 2018/19-2020/21); it is a later option, not a default.
+- F7 `[docs]` `documentation/documentation.Rmd` diverges from the Stan code in three places and this
+  model follows the CODE: (i) it names the vaccine effects differently (its `ve_inf` = infectiousness
+  = code `ve_spread`; its `ve_susc` = code `ve_inf`; its `ve_severe` = code `ve_ili_cond_inf`);
+  (ii) its vaccination step moves `vax * S_u/(S_u+R_u)` people, the code moves the fraction
+  `delta_vax` of each of S_u and R_u; (iii) its I_v equation lacks the `(1 - ve_susc)` factor. The
+  Rmd is to be brought in line when this model is documented.
 
 ## 7. Process noise (the Kalman filter)
 
@@ -172,12 +196,18 @@ assumptions of the previous Stan model except where the owner has explicitly cha
 
 ## 9. Inference
 
-- I1 `[owner][proposal]` Staged: (i) a base-R REFERENCE implementation (readable, tested against the
-  deterministic simulator and against synthetic parameter recovery); (ii) per-country fits with
-  `R0_s = 1.5` fixed, multi-start optim on the EKF likelihood (the existing harness); (iii) the JOINT
-  fit of all countries and seasons with shared `R0_s`, which needs the Kalman loop in Rcpp (see the
-  feasibility note in the settings file).
-- I2 `[proposal]` Point estimates are MAP (penalised EKF likelihood); uncertainty from the Hessian
+- I1 `[owner]` Staged: (i) a base-R REFERENCE implementation (readable, tested against the
+  deterministic simulator, against a growth-rate check of the R0 calibration, and against synthetic
+  parameter recovery); (ii) per-country fits: `S0_c` + regularised per-season `R0_{c,s}` + c, b, phi, q,
+  multi-start optim on the EKF likelihood (the existing harness); (iii) an Rcpp port of the Kalman
+  loop, and (iv) the JOINT fit of all countries and seasons with `R0_s` shared (feasibility note in
+  the settings file).
+- I2 `[owner]` The base-R model and the C++ implementation must remain IDENTICAL: a test evaluates
+  both likelihoods and both filtered trajectories on the same data and parameters and requires
+  agreement to numerical precision (1e-10 relative); the C++ code carries a header note that the
+  R version is the reference and every change must be made in both. (Test and note are added with
+  the port, stage iii.)
+- I3 `[proposal]` Point estimates are MAP (penalised EKF likelihood); uncertainty from the Hessian
   (Laplace) at the optimum; no MCMC.
 
 ## 10. Deliberately NOT modelled
