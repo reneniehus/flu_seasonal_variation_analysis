@@ -41,7 +41,10 @@ age_experiment_row = function(fit, cc, v){
   ratio = colMeans(do.call(rbind, lapply(seq_along(fit$seasons), function(k){ y = fit$y[[k]]; m = fit$mu_det[[k]]; ok = is.finite(y)
     vapply(seq_len(ncol(y)), function(a) sum(y[ok[, a], a]) / sum(m[ok[, a], a]), numeric(1)) })), na.rm = TRUE)
   att = colMeans(fit$attack)
+  # negll_* are the PENALISED objectives (each N(0,1) age prior adds 0.92 nats at its centre, so they
+  # are not comparable across variants); loglik_ekf is the pure EKF log-likelihood used for the gains
   data.frame(country = cc, variant = v, n_seasons = length(fit$seasons), negll_stage1 = if (is.null(fit$stage1)) NA_real_ else fit$stage1$negll, negll_ekf = fit$negll,
+             loglik_ekf = fit$loglik,
              phi = fit$params$phi, S0 = fit$params$S0,
              c_young_rel = fit$params$c_age[1] / fit$params$c_age[2], c_elderly_rel = fit$params$c_age[3] / fit$params$c_age[2],
              se_log2c_young = unname(fit$se["log2c_young"])[1], se_log2c_elderly = unname(fit$se["log2c_elderly"])[1],

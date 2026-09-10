@@ -223,13 +223,13 @@ plot_cm_age_experiment = function(tab){
     facet_wrap(~ mechanism) + scale_colour_manual(values = gcol, name = NULL) +
     labs(title = "The fitted age effect under each mechanism (log2 vs the medium group; Laplace 95%; band = prior 95%)",
          x = "log2 effect", y = NULL) + theme_minimal(base_size = 10) + theme(legend.position = "top")
-  # (c) likelihood: how much each mechanism improves on A (same parameter count for B and C)
-  lik = tab %>% group_by(country) %>% mutate(d_ekf = negll_ekf - negll_ekf[variant == "A_none"], d_det = negll_stage1 - negll_stage1[variant == "A_none"]) %>%
-    ungroup() %>% filter(variant != "A_none")
-  p3 = ggplot(lik, aes(variant, -d_ekf, colour = country, group = country)) + geom_hline(yintercept = 0, colour = "grey60") +
+  # (c) likelihood: how much each mechanism improves on A (same parameter count for B and C); the PURE
+  # EKF log-likelihood, not the penalised objective (each age prior adds a constant at its centre)
+  lik = tab %>% group_by(country) %>% mutate(gain = loglik_ekf - loglik_ekf[variant == "A_none"]) %>% ungroup() %>% filter(variant != "A_none")
+  p3 = ggplot(lik, aes(variant, gain, colour = country, group = country)) + geom_hline(yintercept = 0, colour = "grey60") +
     geom_line(alpha = 0.6) + geom_point(size = 2) + scale_colour_manual(values = ccol, name = NULL) +
-    labs(title = "Likelihood gain over variant A (EKF stage; nats)", subtitle = "B and C add two parameters each, D four; a gain of ~2 nats per parameter is what noise buys.",
-         x = NULL, y = "negll(A) - negll(variant)") + theme_minimal(base_size = 10) + theme(plot.subtitle = element_text(size = 8))
+    labs(title = "Log-likelihood gain over variant A (EKF; nats)", subtitle = "B and C add two parameters each, D four; a gain of ~1-2 nats per parameter is what noise buys.",
+         x = NULL, y = "loglik(variant) - loglik(A)") + theme_minimal(base_size = 10) + theme(plot.subtitle = element_text(size = 8))
   # (d) the modelled attack-rate profile by age under each variant against PHIRST
   ph = phirst_group_ratios()
   att = tab %>% transmute(country, variant, `young / medium` = attack_young / attack_medium, `elderly / medium` = attack_elderly / attack_medium) %>%
