@@ -116,6 +116,13 @@ code/03_report/                eyeballing_report.Rmd (data-quality / dynamics re
 code/04_modelling/             build_slim_panel.R (write the committed panel via the shared stitch),
                                fit_methods_demo.R (every method, all seasons), descriptive_overview.R,
                                ekf_overview.R
+code/06_comp_model/            the age x vaccination compartmental model (branch flu_comp_model):
+                               ASSUMPTIONS.md (every assumption, with provenance and evidence),
+                               comp_model_settings.R, contact_matrix.R (exact-R0 scaling),
+                               comp_model_core.R (R reference) + comp_model_core.cpp (identical
+                               C++ engine), comp_model_data.R, comp_model_fit.R (two-stage EKF),
+                               comp_model_report.R (eyeballing figures), run_comp_model.R,
+                               comp_model_joint.R + run_comp_model_joint.R (shared season R0)
 code/05_analysis/              the driver analysis: analysis_helpers.R (shared Gibbs samplers, rhat,
                                VE-vs-dominant rule), prepare_descriptors.R, dominant_subtype.R,
                                analyse_patterns.R, plot_patterns.R, plot_vax_scatter.R,

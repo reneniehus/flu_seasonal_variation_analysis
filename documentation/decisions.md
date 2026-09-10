@@ -354,3 +354,39 @@ spelled out in `code/06_comp_model/ASSUMPTIONS.md` and encoded in
 - **Vaccination timing as before**: one 65+ pulse on 1 October, none for younger groups (no data).
 - Fixed values from the owner's notes: gamma = 0.2777778/day (3.6 d), ve_inf = 0.25,
   ve_ili_cond_inf = 0.20, ve_spread = 0.20; season-specific VE from the provenance CSV is a switch.
+
+## 2026-09 compartmental model: what the Danish pilot changed (evidence in `code/06_comp_model/ASSUMPTIONS.md`)
+
+The first fits of the age- and vaccination-structured model on Denmark, read through the eyeballing
+figures, overturned four of the assumptions first agreed. Each is a settings switch so the earlier
+variant stays reproducible; the defaults now follow the evidence and await the owner's confirmation.
+
+- **Per-season seed size (arrival time).** A fixed 1 August seed with S0 shared across seasons left no
+  handle on when a season arrives: the deterministic SIR peaked at week 15-22 against observed peaks
+  at week 30-35, and the filter could only follow the data by abandoning the model. A per-season seed
+  (log-normal deviation) shifts arrival without touching the growth rate -- the smooth form of the
+  Stan model's disabled `i_season` term.
+- **Age-specific reporting (Stan `prop_ili_age`).** Age-invariant reporting over-predicted the medium
+  group ~2x in every season; the age-offset fit is 118 nats better (medium adults report ~0.5x the
+  young and ~0.35x the elderly per infection). This reverses the "detection age-invariant" decision,
+  pending the owner: it is an age effect on ILI-per-infection or care-seeking, indistinguishable here
+  from age-specific susceptibility.
+- **Per-season reporting deviation (Stan `prop_ili_season`).** With S0 shared and R0_s the only season
+  factor, the 2-4x larger 2015/16, 2017/18 and 2024/25 peaks cannot be reproduced -- a larger R0 also
+  makes a wave sharper and earlier -- and widening the R0 prior (sd 0.05 -> 0.3) changed nothing; the
+  likelihood keeps R0_s within 1.44-1.60. A season deviation on reporting absorbs the size differences
+  (89 nats; 0.5-1.7x). Consequence for the joint stage: season size may need a Europe-wide severity
+  factor alongside R0_s.
+- **Baseline per data source.** RespiCompass ILI+ is exactly zero before the wave (24-52 zeros per
+  pre-COVID season in DK); the ERVISS reconstruction has a positive floor; one shared baseline forced
+  phi towards 1.
+- **EKF design.** Estimating q let the filter carry the wave (q -> 0.3-0.6) and the mechanistic
+  parameters wandered; a seed-scaled initial covariance was exploited the same way (the EKF objective
+  preferred a degenerate baseline-plus-noise mode, 6564 vs 9100). Decisions: two-stage fitting
+  (deterministic first, EKF from that optimum), P0 = 0, q fixed at 5% weekly -- the filter is a wiggle
+  layer, not a replacement for the model. With these, the EKF optimum agrees with the deterministic
+  one in every parameter (S0 0.830 vs 0.834; R0_s within 0.02).
+- **Observation noise.** The age-specific weekly series scatter 23% around a 3-week moving average
+  (phi ~ 3 irreducible); the phi prior was recentred from 15 to 4.
+- **C++ engine.** Verified identical to the R reference to 1e-10 on synthetic and real data
+  (`tests/testthat/test-comp-model-cpp.R`, 39 assertions); the default engine for fitting.
