@@ -275,7 +275,7 @@ plot_cm_susc_grid = function(res){
 
 save_cm_susc_grid = function(res, dir = "output/comp_model/susc_grid"){
   dir.create(dir, showWarnings = FALSE, recursive = TRUE); ps = plot_cm_susc_grid(res)
-  ggsave(file.path(dir, "susc_profile_likelihood.png"), ps$profile, width = 8, height = 5, dpi = 110)
+  ggsave(file.path(dir, "susc_profile_likelihood.png"), ps$profile, width = 10.5, height = 5, dpi = 110)
   ggsave(file.path(dir, "susc_profile_per_country.png"), ps$per_country, width = 11, height = 4.5, dpi = 110)
   write.csv(res$profile, file.path(dir, "susc_profile.csv"), row.names = FALSE); write.csv(res$tab, file.path(dir, "susc_grid.csv"), row.names = FALSE)
   invisible(dir)

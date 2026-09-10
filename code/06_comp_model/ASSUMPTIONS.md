@@ -104,6 +104,17 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   ordering in the age experiment (decisions.md, 2026-09). Cross-country logic of that experiment: a
   susceptibility effect should give the SAME direction of over/under-prediction by age in every
   country under age-invariant reporting; reporting differences would vary by surveillance system.
+  OUTCOME (12 countries, `run_age_experiment.R` + `run_susc_grid.R`, decisions.md 2026-09): with each
+  country's reporting offsets free, one profile shared by all countries is best at young 1.0 and
+  elderly 1.7-2.8 (+89 nats total; every country's own best has elderly > 1, and any extra young
+  susceptibility loses likelihood in 10 of 12 countries). Reading: the young excess is a reporting
+  LEVEL effect; the elderly excess is a shared DYNAMIC effect (elderly ~2x more susceptible per
+  contact than the vaccination-adjusted contact matrix implies), which brings the modelled
+  elderly/adult attack ratio to 0.5-0.9 against PHIRST's 0.8. PHIRST's young/adult 1.7 (model ~1.0)
+  stays unexplained -- age-specific initial immunity (E2) is the next candidate. Proposal for the
+  joint stage: one shared elderly factor (prior `log2 sigma_eld ~ N(1, 0.5)`), young fixed at 1,
+  reporting offsets per country; per-country fits keep `susc_by_age = FALSE` (D is unidentified
+  within a country). `susc_fixed` sets a fixed profile for such runs.
 
 ## 4. Vaccination
 
@@ -281,9 +292,11 @@ the source alignment).
 ## 11. Open decisions (`[open]`)
 
 1. The AGE MECHANISM: age-specific reporting offsets (F2, default ON) versus age-specific
-   susceptibility (C7) -- decided on the cross-country age experiment and the PHIRST attack-rate
-   profile (decisions.md, 2026-09). An age-specific `S0` modifier (E2) is the third reading of the
-   same evidence (initial immunity by age rather than susceptibility per contact); not fitted yet.
+   susceptibility (C7). Evidence in (decisions.md, 2026-09): reporting per country for the young,
+   a shared elderly susceptibility factor for the joint stage -- awaiting the owner's decision. An
+   age-specific `S0` modifier (E2) is the third reading of the same evidence (initial immunity by
+   age rather than susceptibility per contact) and the candidate for PHIRST's young/adult ratio of
+   1.7 that neither mechanism reproduces; not fitted yet.
 2. Per-season drift of the reporting proportion `c` (F2) -- ON by default on Danish evidence; the
    joint stage decides whether the season deviation is shared across countries.
 3. Prior widths in H1-H3 and the process-noise prior (G2).

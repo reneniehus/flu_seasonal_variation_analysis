@@ -390,3 +390,73 @@ variant stays reproducible; the defaults now follow the evidence and await the o
   (phi ~ 3 irreducible); the phi prior was recentred from 15 to 4.
 - **C++ engine.** Verified identical to the R reference to 1e-10 on synthetic and real data
   (`tests/testthat/test-comp-model-cpp.R`, 39 assertions); the default engine for fitting.
+
+## 2026-09 compartmental model: which age mechanism? (12 countries, PHIRST)
+
+**Question.** Age-invariant reporting over-predicted the medium group in Denmark. Two mechanisms can
+absorb that and are not separable on one country: age-specific REPORTING (ILI+ per infection differs
+by age; dynamics untouched) or age-specific SUSCEPTIBILITY (the attack-rate profile itself differs).
+The owner's test: biology should show the same sign in every country, surveillance should not; the
+external anchor is the PHIRST cohort (South Africa, twice-weekly PCR irrespective of symptoms,
+Cohen et al. 2021, Figure 2A), whose infection incidence by age collapses to our groups as
+young/adult 1.65-1.80 and elderly/adult 0.80.
+
+**Design.** `code/06_comp_model/run_age_experiment.R`: the 12 countries with >= 6 age-complete seasons,
+four variants -- A none, B reporting offsets, C per-contact susceptibility (row scaling of the contact
+matrix renormalised to spectral radius 1, so R0_s keeps its meaning), D both. Nested variants are
+warm-started from their parent's optimum and polished from the parent's EKF optimum (the objective is
+bimodal: a reporting-like and a susceptibility-like mode; without this D 'lost' to B by optimiser
+noise). Gains are pure EKF log-likelihoods (each N(0,1) age prior adds 0.92 nats at its centre).
+`run_susc_grid.R`: the profile likelihood of ONE susceptibility profile shared by all countries
+(young x elderly grid) with the reporting offsets free per country -- the across-country separation.
+
+**Findings.**
+1. *Direction.* Under age-invariant reporting the contact structure alone under-predicts the young
+   in 10/12 countries and the elderly in 11/12 (relative to adults; exceptions NO and IE for the
+   young, HR for the elderly). The same sign almost everywhere = an age effect the model lacks; but
+   the magnitudes (young 0.45-5.2x, elderly 0.95-7.2x) are far too heterogeneous for biology, so
+   country-specific reporting is needed whatever else is true.
+2. *Per-country likelihood.* Reporting offsets beat susceptibility in 9/12 countries (median gain
+   over A: 188 vs 130 nats; |difference| > 2 nats in 11/12); susceptibility wins in EE (+56), IE (+5),
+   BE (+2). Both together add a median 8 nats (-1 to +55) over the better single mechanism, and
+   within a country the elderly effect wanders freely between the two -- the trade-off predicted.
+3. *Attack-rate profile vs PHIRST.* With contacts alone (A, B): young/adult 0.95 (0.74-1.17),
+   elderly/adult 0.29 (0.16-0.47). Per-country susceptibility (C) reproduces PHIRST's young ratio
+   in the median (1.76) but ranges 0.34-6.6 across countries; elderly 0.50.
+4. *Shared profile, reporting free (the decisive test).* Total over 12 countries: best at young 1.0,
+   elderly 1.7 (+89 nats; elderly 2.8: +39). Any extra young susceptibility LOSES likelihood in
+   almost every country (1.4: -55 to -89 total; 1.8: -210 to -290; 2.4: about -500; per country only
+   PL wants 1.8 and DK is flat at 1.4). Every country's own best profile has elderly > 1 (2.8 in 8 of
+   12), with gains of 1-13 nats each (EE 59). Under it the elderly/adult attack ratio is 0.5-0.9
+   (BE 0.78, DK 0.86, IT 0.90, NO 0.90), close to PHIRST's 0.80; the young/adult ratio stays ~1.
+
+**Reading.** The young excess in the observations is a LEVEL effect: once each country's reporting
+level is free, the weekly wave shapes reject the young being more susceptible per contact than the
+contact matrix implies (a higher young share of transmission would make their wave earlier and
+sharper relative to the adults', and the data do not show it). It is reporting -- children consult
+more per infection, paediatric sentinel practices -- with a magnitude that is a property of each
+surveillance system. The elderly excess has a DYNAMIC component with the same sign in all 12
+countries: the elderly are infected roughly 1.7-2.8x more per contact than the (vaccination-adjusted)
+contact matrix implies -- immunosenescence, care homes, or contact matrices that understate the
+elderly's exposure. That is the shared-biology signature the owner's test asked for, and it moves
+the modelled elderly attack rate to where the reporting-independent cohort puts it.
+
+**Unresolved.** PHIRST's young/adult infection ratio of 1.7 against the model's ~1.0 at any
+plausible young susceptibility. The remaining candidate is age-specific INITIAL immunity (S0 by age,
+open decision E2/11.1): adults carry more prior immunity than children, which raises the young's
+attack rate with a different shape signature than per-contact susceptibility. A grid over
+S0_young/S0_adult with reporting free is the next test; child-child contact weights of the synthetic
+matrices are the other suspect.
+
+**Decisions / recommendations (pending the owner).** Per-country default stays B (age reporting
+offsets per country, `c_by_age = TRUE`). For the joint stage: ONE elderly susceptibility factor
+shared across countries (start at 2; prior `log2 sigma_eld ~ N(1, 0.5)`), young fixed at 1,
+reporting offsets per country; PHIRST is a check, not a target. Do not fit D per country -- it is
+unidentified within a country.
+
+**Also this round.** Seed prior recentred to 10^-6.5 (sd 3) after 29% of fitted seeds fell below the
+old prior's lower bound (late waves need small seeds); the EKF post-update clamp floored at 1e-12
+instead of 0 and re-seeded the vaccinated infectious weekly (fixed in both engines, tested); the
+fitter's start vector is built by one function checked for every switch combination (a missing slot
+had silently shifted every later parameter); the parameters are spelled out in words in
+ASSUMPTIONS.md section 12 (phi = measurement noise, does not propagate; q = process noise, does).
