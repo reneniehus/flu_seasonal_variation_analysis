@@ -146,7 +146,19 @@ plot_cm_seasons = function(fits){
     geom_line() + geom_point(size = 2) +
     labs(title = "Effective reproduction number at season start, R0_s x S0_c", x = NULL, y = "R_eff") +
     theme_minimal(base_size = 10) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
-  list(R0 = p1, S0 = p2, attack = p3, R_eff = p4)
+  # the season REPORTING deviation (ILI+ per infection relative to the country's norm): where season
+  # size lives once R0_s is pinned by wave shape -- lines moving together = a Europe-wide season
+  # severity / symptomaticity factor, the observation-side twin of a shared R0_s
+  p5 = ggplot(summ, aes(season, c_season, group = country, colour = country)) +
+    geom_hline(yintercept = 1, colour = "grey60", linetype = "dashed") +
+    annotate("rect", xmin = -Inf, xmax = Inf, ymin = exp(-1.96 * fits[[1]]$settings$prior_logc_season_sd),
+             ymax = exp(1.96 * fits[[1]]$settings$prior_logc_season_sd), fill = "#8da0cb", alpha = 0.2) +
+    geom_line() + geom_point(size = 2) + scale_y_log10() +
+    labs(title = "Season reporting deviation per country: ILI+ per infection relative to the country's norm",
+         subtitle = "blue band = prior 95%. This is where season SIZE lives (R0_s is pinned by wave shape); lines moving together = a shared season severity factor.",
+         x = NULL, y = "exp(delta_s)  (log scale)") + theme_minimal(base_size = 10) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.subtitle = element_text(size = 8))
+  list(R0 = p1, S0 = p2, attack = p3, R_eff = p4, c_season = p5)
 }
 
 # ---- |-write the per-country and cross-country figures ----
@@ -165,6 +177,7 @@ save_cm_report = function(fits, dir = "output/comp_model"){
     ggsave(file.path(dir, "countries_S0.png"), ps$S0, width = 6, height = 4, dpi = 110)
     ggsave(file.path(dir, "attack_rates.png"), ps$attack, width = 11, height = 2.2 * ceiling(length(fits) / 3) + 1.5, dpi = 110)
     ggsave(file.path(dir, "R_eff.png"), ps$R_eff, width = 9, height = 5, dpi = 110)
+    ggsave(file.path(dir, "seasons_reporting_deviation.png"), ps$c_season, width = 9.5, height = 5, dpi = 110)
   }
   write.csv(do.call(rbind, lapply(fits, summarise_comp_fit)), file.path(dir, "comp_model_summary.csv"), row.names = FALSE)
   invisible(dir)
