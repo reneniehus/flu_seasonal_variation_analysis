@@ -332,3 +332,25 @@ Gibbs helpers, setup.R pruning) are not decisions and are only noted in commit m
   the rise window that identifies S0 (profile-likelihood check: at the regularised q_I the data barely
   constrain S0 beyond its prior). Not hot-swapped (the priors/P0 are tuned to the additive scale);
   'additive vs proportional (log-I) q_I' joins the p0/q_I sensitivity plan above.
+
+## 2026-09 compartmental model (`flu_comp_model` branch): assumptions fixed before the rewrite
+
+The age- and vaccination-structured multi-season model is being rewritten in base R with an EKF.
+Every assumption, with provenance (owner decision / Stan model / old notes / data / proposal), is
+spelled out in `code/06_comp_model/ASSUMPTIONS.md` and encoded in
+`code/06_comp_model/comp_model_settings.R`. Decisions of record made here:
+
+- **Contact-matrix scaling.** The Stan model's `beta * a_factor * rowNormalised(C)` equals
+  `(beta / cbar) * C`, whose realised R0 at full susceptibility is `R0 * rho(C)/cbar` = 1.58-1.73 across
+  the 28 country matrices (median 1.65) instead of the intended 1.5, varying by country. The model now
+  divides the contact matrix by its dominant eigenvalue so the next-generation matrix has spectral
+  radius exactly R0_s (the normalisation this log recommended in 2026-06). `a_factor` is dropped.
+- **Season-level R0_s shared across countries**, strong prior around 1.5; identified only by pooling
+  across countries (within one country-season it trades off with S0), so per-country stage fits keep
+  R0 fixed.
+- **No likelihood tempering.** The Stan runner's `weight_obs_epi = 0.1` and the separate
+  cumulative-burden term are dropped: the weekly likelihood already contains the season burden.
+- **Detection age-invariant**; one reporting proportion per country; three age groups 0-14/15-64/65+.
+- **Vaccination timing as before**: one 65+ pulse on 1 October, none for younger groups (no data).
+- Fixed values from the owner's notes: gamma = 0.2777778/day (3.6 d), ve_inf = 0.25,
+  ve_ili_cond_inf = 0.20, ve_spread = 0.20; season-specific VE from the provenance CSV is a switch.
