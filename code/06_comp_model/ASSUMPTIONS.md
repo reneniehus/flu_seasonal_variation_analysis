@@ -203,8 +203,15 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   a larger R0 makes a wave sharper and earlier as well as bigger -- and the season deviation absorbs
   them (89 nats; deviations 0.5-1.7x). CONFIRMED by the owner 2026-09-11: the AGE OFFSETS are FITTED,
   one pair per COUNTRY, SHARED ACROSS that country's SEASONS -- reporting is a property of a
-  surveillance system, not of a season. (The season deviation `exp(delta_s)` is a separate switch,
-  still open: see 11.2.) The baseline `b` is PER SOURCE (`b_by_source`): RespiCompass
+  surveillance system, not of a season. DECIDED `[owner, 2026-09-11]`: the SEASON DEVIATION
+  `exp(delta_s)` is ONE VALUE PER SEASON SHARED ACROSS COUNTRIES in the joint model (8 parameters,
+  not 96) -- the observation-side twin of the shared `R0_s`: strain symptomaticity is viral and
+  Europe-wide, and the per-country deviations already moved together (FR-ES 0.97, FR-NO 0.82,
+  DK-ES 0.78). Interpretation: ILI+ per infection in season s relative to the norm, a mix of strain
+  symptomaticity (shared), care-seeking/testing that year (local, now absorbed elsewhere or into
+  phi) and season size the mechanism cannot produce. Country-season misfit therefore lands in phi,
+  S0_c or R0_s and must be watched (Estonia is the known outlier). Per-country fits keep it free
+  per season as the warm start and the sharing diagnostic. The baseline `b` is PER SOURCE (`b_by_source`): RespiCompass
   ILI+ is exactly zero in weeks without detections (24-52 zeros per pre-COVID season in DK) while the
   ERVISS reconstruction has a positive floor, and one shared b forced phi towards 1.
 - F3 `[stan][proposal]` Scale: ILI+ rates per 100 000 of the age group are converted to COUNTS via
@@ -310,8 +317,8 @@ the source alignment).
 1. ~~The AGE MECHANISM~~ -- SETTLED `[owner, 2026-09-11]`: reporting offsets per country (F2) plus
    ONE elderly susceptibility factor shared across countries, young fixed at 1 (C7). Age-specific
    initial immunity is PARKED, not rejected (E5).
-2. Per-season drift of the reporting proportion `c` (F2) -- ON by default on Danish evidence; the
-   joint stage decides whether the season deviation is shared across countries.
+2. ~~Per-season drift of the reporting proportion `c`~~ -- SETTLED `[owner, 2026-09-11]`: one season
+   deviation per season, SHARED ACROSS COUNTRIES in the joint model (F2).
 3. Prior widths in H1-H3 and the process-noise prior (G2).
 4. Season-specific VE from the CSV vs the fixed notes values (D3).
 

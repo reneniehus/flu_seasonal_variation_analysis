@@ -459,8 +459,15 @@ matrices are the other suspect.
    and to avoid a third age parameter trading off against the two we keep. Consequence, to be
    REPORTED rather than fitted: the model's absolute attack rate in the young is probably too low,
    and PHIRST's young/adult ratio of ~1.7 against the model's ~1.0 stands as a documented shortfall.
+4. The SEASON OBSERVATION DEVIATION is ONE VALUE PER SEASON, SHARED ACROSS COUNTRIES (8 parameters,
+   not 96): the observation-side twin of the shared season transmissibility. Interpretation: ILI+
+   per infection in that season relative to the norm -- strain symptomaticity (viral, shared), plus
+   whatever season size the mechanism cannot produce. The per-country deviations already moved
+   together (FR-ES 0.97, FR-NO 0.82, DK-ES 0.78); Estonia is the known exception, so
+   country-season misfit now lands in phi, S0_c or R0_s and must be watched. Per-country fits keep
+   the deviation free per season as the warm start and as the diagnostic of the sharing assumption.
 PHIRST remains a check, not a target. D (both mechanisms free per country) is not to be fitted --
-it is unidentified within a country. Recorded in ASSUMPTIONS.md C7, F2, E5, 11.1.
+it is unidentified within a country. Recorded in ASSUMPTIONS.md C7, F2, E5, 11.1, 11.2.
 
 **Also this round.** Seed prior recentred to 10^-6.5 (sd 3) after 29% of fitted seeds fell below the
 old prior's lower bound (late waves need small seeds); the EKF post-update clamp floored at 1e-12
