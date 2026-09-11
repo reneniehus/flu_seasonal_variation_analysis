@@ -448,11 +448,19 @@ attack rate with a different shape signature than per-contact susceptibility. A 
 S0_young/S0_adult with reporting free is the next test; child-child contact weights of the synthetic
 matrices are the other suspect.
 
-**Decisions / recommendations (pending the owner).** Per-country default stays B (age reporting
-offsets per country, `c_by_age = TRUE`). For the joint stage: ONE elderly susceptibility factor
-shared across countries (start at 2; prior `log2 sigma_eld ~ N(1, 0.5)`), young fixed at 1,
-reporting offsets per country; PHIRST is a check, not a target. Do not fit D per country -- it is
-unidentified within a country.
+**DECIDED by the owner, 2026-09-11.** Three decisions, taken on the evidence above:
+1. ONE elderly susceptibility factor SHARED ACROSS COUNTRIES, with the YOUNG FIXED AT 1. Biology is
+   one number for Europe, not twelve; and the grid showed a free young factor loses likelihood in 10
+   of 12 countries, so fitting it would only let it re-absorb reporting level. Prior
+   `log2 sigma_eld ~ N(1, 0.5)`: centre 2x, 95% band 1.0-4.0x.
+2. AGE REPORTING OFFSETS ARE FITTED, one pair per COUNTRY, SHARED ACROSS that country's SEASONS --
+   reporting is a property of a surveillance system, not of a season.
+3. AGE-SPECIFIC INITIAL IMMUNITY IS PARKED (not rejected) to keep the model from over-complicating
+   and to avoid a third age parameter trading off against the two we keep. Consequence, to be
+   REPORTED rather than fitted: the model's absolute attack rate in the young is probably too low,
+   and PHIRST's young/adult ratio of ~1.7 against the model's ~1.0 stands as a documented shortfall.
+PHIRST remains a check, not a target. D (both mechanisms free per country) is not to be fitted --
+it is unidentified within a country. Recorded in ASSUMPTIONS.md C7, F2, E5, 11.1.
 
 **Also this round.** Seed prior recentred to 10^-6.5 (sd 3) after 29% of fitted seeds fell below the
 old prior's lower bound (late waves need small seeds); the EKF post-update clamp floored at 1e-12

@@ -111,10 +111,14 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   LEVEL effect; the elderly excess is a shared DYNAMIC effect (elderly ~2x more susceptible per
   contact than the vaccination-adjusted contact matrix implies), which brings the modelled
   elderly/adult attack ratio to 0.5-0.9 against PHIRST's 0.8. PHIRST's young/adult 1.7 (model ~1.0)
-  stays unexplained -- age-specific initial immunity (E2) is the next candidate. Proposal for the
-  joint stage: one shared elderly factor (prior `log2 sigma_eld ~ N(1, 0.5)`), young fixed at 1,
-  reporting offsets per country; per-country fits keep `susc_by_age = FALSE` (D is unidentified
-  within a country). `susc_fixed` sets a fixed profile for such runs.
+  stays unexplained. DECIDED `[owner, 2026-09-11]`: the joint model carries ONE ELDERLY
+  SUSCEPTIBILITY FACTOR SHARED ACROSS COUNTRIES, with the YOUNG FIXED AT 1 -- biology is one number
+  for Europe, not twelve. Prior `log2 sigma_eld ~ N(1, 0.5)` (centre 2x, 95% band 1.0-4.0x). The
+  young factor is not fitted at all: the grid showed the weekly wave shapes reject it in 10 of 12
+  countries, so a free young parameter would only re-absorb reporting level. Per-country fits keep
+  `susc_by_age = FALSE`; `susc_fixed = c(1, 1, sigma_eld)` supplies the shared factor when the outer
+  stage holds it fixed. The young/adult attack-rate gap against PHIRST is therefore a KNOWN,
+  DOCUMENTED shortfall of the model, not a parameter -- report it, do not fit it (see E5).
 
 ## 4. Vaccination
 
@@ -168,6 +172,15 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   per-season S0 absorbed timing. Set `I0_by_season = FALSE` to reproduce the fixed-seed variant.
 - E4 `[data]` The four COVID seasons are excluded as OUTCOMES (same rule as the panel); the season
   window and the RespiCompass/ERVISS stitch follow `stitch_iliplus.R`.
+- E5 `[owner, 2026-09-11]` AGE-SPECIFIC INITIAL IMMUNITY (an `S0_a` modifier) is PARKED -- deliberately
+  not fitted, to keep the model from over-complicating and to avoid a third age parameter that trades
+  off against the two we keep (reporting offsets F2 and the shared elderly susceptibility C7). It is
+  parked, NOT rejected: it remains the leading mechanistic candidate for the one thing the model does
+  not reproduce, PHIRST's young/adult infection ratio of ~1.7 against the model's ~1.0 (C7). The
+  consequence is stated as a limitation: `S0` is shared across age groups, so the model's ABSOLUTE
+  attack rate in the young is probably too low, and age-group attack rates should be read as relative
+  within an age group across seasons -- exactly the same caution the single-population methods carry
+  for `S0` across seasons. Revisit only if a question needs the young's absolute burden.
 
 ## 6. Observation model
 
@@ -177,7 +190,7 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   model's `prop_ili_age` offsets are dropped by decision). Consequently age differences in observed
   ILI+ must be explained by the DYNAMICS (contact structure, susceptibility) -- a strong, testable
   assumption.
-- F2 `[stan][proposal, revised on evidence -- pending owner]` Expected ILI+ per age and week:
+- F2 `[stan][owner, confirmed 2026-09-11]` Expected ILI+ per age and week:
   `mu[t,a] = c_{c,s,a} * (new infections in week t, age a, vaccinated infections weighted
   (1 - ve_ili_cond_inf)) + b_source * N_a / 1e5`, with
   `c_{c,s,a} = c_c * 2^(off_a) * exp(delta_s)`: a country reporting proportion (the Stan `prop_ili`),
@@ -188,7 +201,10 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   better (fitted: young 2.1x, elderly 2.8x the medium rate per infection); (ii) with S0 shared and R0_s
   the only season factor the 2015/16, 2017/18 and 2024/25 peaks (2-4x larger) cannot be reproduced --
   a larger R0 makes a wave sharper and earlier as well as bigger -- and the season deviation absorbs
-  them (89 nats; deviations 0.5-1.7x). The baseline `b` is PER SOURCE (`b_by_source`): RespiCompass
+  them (89 nats; deviations 0.5-1.7x). CONFIRMED by the owner 2026-09-11: the AGE OFFSETS are FITTED,
+  one pair per COUNTRY, SHARED ACROSS that country's SEASONS -- reporting is a property of a
+  surveillance system, not of a season. (The season deviation `exp(delta_s)` is a separate switch,
+  still open: see 11.2.) The baseline `b` is PER SOURCE (`b_by_source`): RespiCompass
   ILI+ is exactly zero in weeks without detections (24-52 zeros per pre-COVID season in DK) while the
   ERVISS reconstruction has a positive floor, and one shared b forced phi towards 1.
 - F3 `[stan][proposal]` Scale: ILI+ rates per 100 000 of the age group are converted to COUNTS via
@@ -291,12 +307,9 @@ the source alignment).
 
 ## 11. Open decisions (`[open]`)
 
-1. The AGE MECHANISM: age-specific reporting offsets (F2, default ON) versus age-specific
-   susceptibility (C7). Evidence in (decisions.md, 2026-09): reporting per country for the young,
-   a shared elderly susceptibility factor for the joint stage -- awaiting the owner's decision. An
-   age-specific `S0` modifier (E2) is the third reading of the same evidence (initial immunity by
-   age rather than susceptibility per contact) and the candidate for PHIRST's young/adult ratio of
-   1.7 that neither mechanism reproduces; not fitted yet.
+1. ~~The AGE MECHANISM~~ -- SETTLED `[owner, 2026-09-11]`: reporting offsets per country (F2) plus
+   ONE elderly susceptibility factor shared across countries, young fixed at 1 (C7). Age-specific
+   initial immunity is PARKED, not rejected (E5).
 2. Per-season drift of the reporting proportion `c` (F2) -- ON by default on Danish evidence; the
    joint stage decides whether the season deviation is shared across countries.
 3. Prior widths in H1-H3 and the process-noise prior (G2).
