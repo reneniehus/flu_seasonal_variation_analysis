@@ -327,9 +327,21 @@ plot_jm_recovery = function(rec, d, summ = NULL){
                          "reporting c (country)", "elderly susceptibility (global)"))
   cov_txt = summ$by_family %>% filter(!is.na(coverage)) %>%
     summarise(m = median(coverage)) %>% pull(m)
-  ggplot(cmp, aes(truth, estimate)) +
+  # A replicate in which one country fell into the flat-line optimum throws an estimate far off scale
+  # and would squash every other panel flat. Such points are WINSORISED FOR DISPLAY ONLY, drawn as
+  # open triangles at the panel edge and counted in the subtitle, so they are visible rather than
+  # hidden and the informative range stays readable.
+  cmp = cmp %>% group_by(family) %>%
+    mutate(rng = diff(range(truth)),
+           cap_hi = max(truth) + 0.35 * ifelse(rng > 0, rng, abs(max(truth))),
+           cap_lo = min(truth) - 0.35 * ifelse(rng > 0, rng, abs(max(truth))),
+           off = estimate > cap_hi | estimate < cap_lo,
+           shown = pmin(pmax(estimate, cap_lo), cap_hi)) %>% ungroup()
+  n_off = sum(cmp$off)
+  ggplot(cmp, aes(truth, shown)) +
     geom_abline(slope = 1, intercept = 0, colour = "grey45", linetype = "dashed") +
-    geom_point(alpha = 0.55, size = 1.7, colour = .jm_blue) +
+    geom_point(data = cmp %>% filter(!off), alpha = 0.55, size = 1.7, colour = .jm_blue) +
+    geom_point(data = cmp %>% filter(off), shape = 2, size = 2.2, stroke = 0.8, colour = .jm_orange) +
     facet_wrap(~ family, scales = "free") +
     labs(title = "Can you believe it, 2: recovering a known truth",
          subtitle = paste0("Data were simulated from the model itself, at a known parameter set, onto the REAL design: the same",
@@ -339,8 +351,9 @@ plot_jm_recovery = function(rec, d, summ = NULL){
                           sprintf("%.2f", summ$rank_shared$spearman_med[summ$rank_shared$block == "R0 by season"][1]),
                           ", susceptibility ranking ", sprintf("%.2f", summ$rank_S0_spearman),
                           ",\n95% interval coverage ", sprintf("%.0f%%", 100 * cov_txt),
-                          ". Anything the fit cannot recover from its own simulation cannot be",
-                          "\ntrusted from real data either."),
+                          ". Orange triangles are ", n_off, " estimate(s) off scale, where one country",
+                          "\nin one replicate fell into the flat-line optimum; they are drawn at the panel edge, not dropped.",
+                          "\nAnything the fit cannot recover from its own simulation cannot be trusted from real data either."),
          x = "true value", y = "estimated value") + .jm_theme()
 }
 

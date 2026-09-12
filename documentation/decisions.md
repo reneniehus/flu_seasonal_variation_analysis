@@ -536,3 +536,66 @@ and only the second is publishable.
 
 **Visual summary.** Parameter scope map plus these results:
 https://claude.ai/code/artifact/f6fddc68-046e-4d18-9d75-ce896edaf16f
+
+## 2026-09-12 the working model: simpler, joint, and recovery-tested
+
+**Decision (owner).** This is the WORKING MODEL. More iterations are expected -- "this is how science
+works" -- but it is the base everything else builds on. Spain is included (the season cut moved from 6
+to 5, giving 12 countries, 86 country-seasons, 184 parameters). Uncertainty intervals are required
+output. The Kalman filter and the driver/subtype validation both WAIT.
+
+**What it is.** `code/07_joint_model/`, with the one-paragraph abstract and the full cut list in
+MODEL.md. A joint age- and vaccination-structured SIR over 12 countries and 8 seasons: transmissibility
+varies between seasons and is shared across countries; susceptibility varies between countries and is
+shared across their seasons; one global elderly susceptibility; reporting varies by country and age but
+not by season except for one shared season visibility constrained to average one; a free seed per
+country-season for arrival time; negative-binomial counts with a country dispersion.
+
+**What was dropped, and why it was defensible.** The Kalman filter, and with it the process noise and
+the initial covariance: measured on the pilot, the filter only behaved with both pinned, and with them
+pinned its optimum equalled the deterministic one in every parameter. Dropping it also freed the
+observation model from the Gaussian a Kalman update requires, which mattered because 29% of observed
+cells are exactly zero and the pilot's fitted dispersion put 15% of its predictive mass below zero.
+
+**Architecture.** The entire log-posterior is one C++ call, so R does no per-evaluation work (the pilot
+spent 42% of each objective in R glue and 28% building trajectories the optimiser discarded). No filter
+means no Jacobian, which is most of why the core is short. Fitting exploits separability: only 16 of 184
+parameters are shared across countries, so block coordinate descent optimises all 12 country blocks in
+parallel, then the shared block, then polishes jointly. 116 s for the full fit; the C++ is ~1750x the
+base-R reference it is tested against.
+
+**Two optimiser findings that cost real time.**
+1. Each country's local block has a SECOND, WRONG OPTIMUM: let the dispersion collapse and the negative
+   binomial becomes so diffuse that every curve fits, so nothing forces a wave and the country flat-lines.
+   The first joint fit lost the Netherlands that way. It is a LOCAL OPTIMUM, not a prior problem --
+   tightening the dispersion prior moved the failure to Poland instead. Fixed by multi-starting each
+   local block from three points; worth 406 nats of likelihood and took the unidentified directions from
+   9 to 0. A residual 1-2% per-country failure rate remains and must be checked for on every fit.
+2. Block coordinate descent leaves a slow tail when the shared and local blocks are correlated (about 2
+   nats per sweep at the cap). The joint polish recovers it (24-31 nats), so keep both stages.
+
+**Identifiability, measured.** Every parameter family contracts between 0.69 and 0.94 against its prior,
+so nothing in this model is a restatement of an assumption. Contrast the pilot, where susceptibility
+looked well determined only because it was borrowing the tight transmissibility prior.
+
+**The honest limitation.** Every country needs about 2.6x more observation noise than its own
+week-to-week scatter can explain (`jm_adequacy`, figure 05). That excess is the deterministic mean
+failing to follow the wave, written off as measurement error. It is the trigger condition for restoring
+the filter, and the filter should be judged on whether it CLOSES THAT GAP rather than on whether it
+moves the estimates.
+
+**What it learns, with intervals.** Season visibility spans 0.57-1.80 with non-overlapping intervals
+between the extreme seasons, while transmissibility spans 1.51-1.71 with intervals of about +/-0.09 that
+mostly overlap. So between-season differences in observed burden are mostly about how VISIBLE a season
+was, not how TRANSMISSIBLE it was. That is the pilot's Danish conclusion, now carried by 86 waves.
+Caveat to carry: season visibility is partly a residual absorber, so read it with the noise budget.
+
+**Recovery.** See MODEL.md for the numbers. Headline: the publishable quantities recover (rank 0.95-0.97,
+coverage 96% median), the intervals are conditional on the optimiser finding the right basin (coverage
+falls to 25-79% when truth is drawn from the priors), and the learning layer's two-step procedure is
+UNBIASED, so driver slopes can be read at face value.
+
+**The recovery harness is built to carry the learning layer.** `jm_truth_with_driver` constructs a world
+where a covariate really moves the season parameters by a known amount, and `jm_driver_recovery` runs the
+fit-then-regress step and checks the slope comes back. Any driver association found in real data can
+therefore be told apart from one manufactured by the procedure, before it is ever claimed.

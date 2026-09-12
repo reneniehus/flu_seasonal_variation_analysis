@@ -89,3 +89,47 @@ fixed, all twelve in parallel, then the shared block is optimised with the local
 convergence and finished with a joint polish. That exploits the separability above: a country's own
 likelihood is a twelfth of the joint one, so a sweep costs about 33 full-likelihood evaluations against
 185 for one finite-difference gradient of the flat problem.
+
+## Does it recover a known truth? (measured 2026-09-12)
+
+`run_joint_recovery.R`, 18 full refits on the real 12-country design. Data simulated from the model
+itself at a known parameter set, then the whole pipeline refitted from scratch.
+
+**1. Truth at the fitted optimum, 8 replicates.** The publishable quantities come back:
+
+| quantity | rank recovery (Spearman) | 95% interval coverage |
+|---|---|---|
+| `R0_s` by season | 0.95 | 98% |
+| season visibility `delta_s` | 0.96 | 89% |
+| `S0_c` ranking across countries | 0.97 | 99% |
+| `sigma_eld` | -- | 100% |
+
+Median coverage across families 96% against a nominal 95%, so on data resembling ours the intervals
+mean what they say.
+
+**2. Truth drawn from the priors, 4 replicates -- the warning.** Rank recovery stays high (`R0_s`
+Spearman 0.99) but COVERAGE COLLAPSES to 25-79% and root-mean-square error rises by an order of
+magnitude. The fit occasionally lands in a different optimum on harder configurations, and the
+interval is then the wrong width in the wrong place. Consequence for reporting: the intervals are
+calibrated for data like ours and are CONDITIONAL ON THE OPTIMISER HAVING FOUND THE RIGHT BASIN; they
+are not a general guarantee.
+
+**3. Driver recovery, 6 replicates -- the learning layer's own validity test.** Truth built so a
+covariate really moves the season parameters (`jm_truth_with_driver`), then the two-step
+fit-then-regress procedure run on the FITTED season parameters (`jm_driver_recovery`):
+
+| effect | truth | recovered (mean) | sd across replicates |
+|---|---|---|---|
+| covariate on `log R0_s` | 0.060 | 0.059 | 0.009 |
+| covariate on `log delta_s` | 0.350 | 0.334 | 0.074 |
+
+Essentially UNBIASED, both within one sd of truth. So the learning layer may regress fitted season
+parameters on drivers and read the slopes at face value; no attenuation correction is needed. (An
+earlier single replicate on a cut-down 2-country design suggested ~20% attenuation. That was an
+artefact of n = 1 on the wrong design and does not hold.)
+
+**Residual defect.** In 1 of 8 replicates, 1 of 12 countries fell into the flat-line optimum
+(dispersion collapses, no wave fitted): roughly a 1-2% failure rate per country-fit. The multi-start
+of the local blocks reduced this from 1-in-11 but did not remove it. It is DETECTABLE rather than
+silent -- a flat-lined country is obvious in figure 03 and in the per-country correlations -- so
+check for it on every real fit.
