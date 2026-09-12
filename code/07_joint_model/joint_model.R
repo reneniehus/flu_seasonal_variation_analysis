@@ -172,12 +172,30 @@ jm_fit = function(d, theta0 = jm_theta0(d), max_sweeps = 15L, tol = 0.05, maxit_
   for (sw in seq_len(max_sweeps)){
     prev = obj
     # --- every country's local block, with the shared block fixed. Independent, so run in parallel.
+    # MULTI-START, and why it is necessary. Each country's block has a second, WRONG optimum: let the
+    # dispersion collapse, and the negative binomial becomes so diffuse that every curve fits equally
+    # well, so there is no pressure to place a wave at all and the country flat-lines at its baseline.
+    # Which country falls into it depends only on where BFGS starts -- tightening the dispersion prior
+    # moved the failure from the Netherlands to Poland rather than removing it. So each block is
+    # started from three points and the best is kept. The extra starts pin the dispersion at the value
+    # the data's own scatter implies, which makes ignoring a wave expensive and pulls the block into
+    # the wave-fitting mode; the dispersion is free again on the next sweep.
     fits = parallel::mclapply(seq_len(d$n_country), function(ic){
       idx = bl$local[[ic]]
       f = function(x){ t2 = th; t2[idx] = x; jm_country_negll_cpp(t2, d, ic - 1L) }
-      o = tryCatch(optim(th[idx], f, method = "BFGS", control = list(maxit = maxit_local, reltol = 1e-10)),
-                   error = function(e) NULL)
-      if (is.null(o)) NULL else list(par = o$par, value = o$value, conv = o$convergence)
+      i_phi = 5L                                       # position of log_phi within the local block
+      i_seed = 5L + d$n_src[ic] + seq_len(d$n_cs_of_country[ic])
+      starts = list(th[idx])                           # (1) warm: where the last sweep left it
+      s2 = th[idx]; s2[i_phi] = d$pr_phi_mean; starts[[2]] = s2          # (2) dispersion at the data's scatter
+      s3 = s2; s3[i_seed] = s3[i_seed] + log(10); starts[[3]] = s3       # (3) ... and an earlier arrival
+      best = NULL
+      for (st in starts){
+        o = tryCatch(optim(st, f, method = "BFGS", control = list(maxit = maxit_local, reltol = 1e-10)),
+                     error = function(e) NULL)
+        if (!is.null(o) && is.finite(o$value) && (is.null(best) || o$value < best$value))
+          best = list(par = o$par, value = o$value, conv = o$convergence)
+      }
+      best
     }, mc.cores = min(cores, d$n_country))
     for (ic in seq_len(d$n_country)) if (!is.null(fits[[ic]])) th[bl$local[[ic]]] = fits[[ic]]$par
     conv_local = vapply(fits, function(f) if (is.null(f)) 99L else as.integer(f$conv), integer(1))

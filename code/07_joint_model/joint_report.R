@@ -115,8 +115,8 @@ plot_jm_countries = function(fit){
     labs(title = "How much more visible a child or an elderly person is, per infection",
          subtitle = paste("Age reporting offsets, relative to adults, one pair per country. Above one means that group generates more",
                           "positive consultations per infection than an adult does: they consult more readily, or the sentinel network",
-                          "sees them more. This is surveillance, not biology, which is exactly why it varies by country while the",
-                          "elderly susceptibility below is one number for everyone.", sep = "\n"),
+                          "sees them more. This is surveillance, not biology, which is exactly why it is allowed to vary by country",
+                          "while the elderly's susceptibility per contact is one number for all of Europe.", sep = "\n"),
          x = "reporting relative to adults (log scale)", y = NULL) + .jm_theme()
   p3 = ggplot(s, aes(c_adult * 100, reorder(country, c_adult))) +
     geom_segment(aes(x = 0, xend = c_adult * 100, yend = reorder(country, c_adult)), colour = "grey80") +
