@@ -475,3 +475,64 @@ instead of 0 and re-seeded the vaccinated infectious weekly (fixed in both engin
 fitter's start vector is built by one function checked for every switch combination (a missing slot
 had silently shifted every later parameter); the parameters are spelled out in words in
 ASSUMPTIONS.md section 12 (phi = measurement noise, does not propagate; q = process noise, does).
+
+## 2026-09-12 compartmental model: identifiability, measured
+
+**Method.** At each country's fitted optimum, the Hessian of the PURE negative log-likelihood (the
+observed Fisher information: the curvature of the fit-quality landscape, with the priors switched off)
+and of the penalised objective. Eigenvalues are the steepnesses of that landscape, eigenvectors the
+directions; a near-zero eigenvalue is a parameter COMBINATION the data cannot see at all. The
+difference between the two matrices is exactly what the priors hold up. Twelve countries, 86
+country-seasons, current defaults (age reporting offsets on, no age susceptibility).
+
+**Finding 1 -- an EXACT flat direction, in all 12 countries.** Every spectrum contains an eigenvalue
+of magnitude 2.6e-8 to 2.3e-7 against a largest of 1.3e5 to 3.4e5, i.e. zero to machine precision.
+Its eigenvector matches the reporting symmetry with cosine 1.000: the likelihood depends on the
+country reporting level `c_c` and the season deviations `exp(delta_s)` only through their products, so
+`c -> c*k` with `delta_s -> delta_s - log k` is numerically invisible. Nine knobs, eight products. On
+Denmark 89% of the flat direction sits on the eight deviations and 11% on the country level. Today only
+the weak N(0, 0.5) prior on the deviations decides where along that valley the fit stops, so the
+ABSOLUTE reporting proportion is an assumption read back, not a result. FIX (required before the joint
+fit): constrain the deviations to a geometric mean of one. With the deviations SHARED across countries
+(decision 2026-09-11) this matters more, not less: one flat direction would then slide all twelve
+country reporting levels together as a block.
+
+**Finding 2 -- susceptibility is ENTANGLED, and the joint fit is the cure.** `S0` never appears alone:
+only as `R0_s*S0` (rise rate), `c*S0` (level) and `I0_s/S0` (arrival). Conditionally -- everything else
+known -- the data pin logit `S0` to sd 0.0067. Marginally, with the eight season `R0_s` free, the
+likelihood-only sd is 1.04 (median over 11 countries; range 0.75-2.15), i.e. a 150-fold inflation from
+the trade-off. On Denmark that is a 95% range of S0 = 0.27-0.985: effectively nothing. Treat the
+`R0_s` as KNOWN and the same data give 0.825-0.839. Median sharpening 50x (range 11-160x). This is the
+quantitative case for the joint fit: pooling `R0_s` over 12 countries removes the partner `S0` trades
+with. CAVEAT: the conditional calculation is an UPPER BOUND, since a joint fit pins `R0_s` with finite
+precision; but 8 numbers carried by 86 waves should recover much of it.
+
+**Finding 3 -- today's S0 error bars are borrowed from the R0 prior.** The penalised fit reports logit
+`S0` to sd 0.112, far tighter than the likelihood alone (1.04) or its own prior (1.0) can give. The
+tight `log R0 ~ N(log 1.5, 0.05)` prior is what breaks the entanglement from outside. PREDICTION to
+test: widening that prior leaves the point estimates alone (as the earlier sensitivity test found) but
+inflates S0's interval substantially. If so, the width of the R0 prior is a scientific assumption that
+must be argued for, not chosen for convenience.
+
+**Per-parameter contraction (1 - sd_post/sd_prior; 0 = the posterior is just the prior).** Age
+reporting offsets 0.91, reporting `c` 0.91, `S0` 0.89, season seeds 0.83, `phi` 0.80, season deviations
+0.61, `R0_s` 0.60. Note the trap: `c` and the deviations look sharply contracted yet their absolute
+level is not identified at all -- conditional precision and marginal precision are different questions
+and only the second is publishable.
+
+**Three code defects it exposed.**
+1. `comp_model_fit.R:28` and `:122` hard-code two baseline slots (`b_RespiCompass`, `b_ERVISS`)
+   regardless of which sources a country's seasons come from. ES and NO have ZERO ERVISS seasons, so
+   their `b_ERVISS` enters no likelihood term and carries no prior: zero curvature from either source,
+   the penalised Hessian is EXACTLY SINGULAR, and Laplace standard errors are impossible. Both needed
+   the slot detected and dropped by hand. Build the slots from the sources present.
+2. Where a source contributes ONE season its baseline is effectively free (data-only sd up to 2.1e3 on
+   the log scale). `b` is the only unpenalised parameter, so nothing catches it. CZ, IT, NL each have a
+   single ERVISS season. A weak prior on `b` would close this.
+3. PL (1 direction) and NL (2) have NEGATIVE likelihood curvature at the optimum. Legitimate rather
+   than a convergence failure -- the optimum minimises the PENALISED objective, so the prior may supply
+   the missing curvature -- but the prior is doing structural work there, and PL's `S0` inverse was
+   numerically degenerate as a result.
+
+**Visual summary.** Parameter scope map plus these results:
+https://claude.ai/code/artifact/f6fddc68-046e-4d18-9d75-ce896edaf16f
