@@ -90,3 +90,52 @@ test_that("the realised R0 is what the dynamics produce, and the contact scaling
   }
   expect_equal(mean(diff(log(tot[60:100]))), log(1 + gamma * (R0 - 1)), tolerance = 5e-3)
 })
+
+test_that("the recovery harness simulates from the model onto the real design", {
+  # The generative and fitted models must be the same code, and the simulated data must sit on the
+  # real design: same missing cells, same dimensions. Anything else and the recovery test is testing
+  # a different model from the one being fitted, which is the usual way such a test ends up vacuous.
+  source(here::here("code/07_joint_model/joint_recovery.R"))
+  set.seed(3)
+  ds <- jm_simulate(th, d, seed = 5)
+  expect_equal(length(ds$y), length(d$y))
+  for (i in seq_along(d$y)){
+    expect_equal(dim(ds$y[[i]]), dim(d$y[[i]]))
+    expect_equal(is.na(ds$y[[i]]), is.na(d$y[[i]]))        # the real missing pattern is preserved
+    expect_true(all(ds$y[[i]][is.finite(ds$y[[i]])] >= 0)) # counts, so non-negative
+  }
+  # the normalising constant and the fields the starting values are built from must be recomputed
+  # from the SIMULATED data, or the refit gets help from the real series
+  expect_false(isTRUE(all.equal(ds$lgamma_y1, d$lgamma_y1)))
+  expect_false(isTRUE(all.equal(ds$rates[[1]], d$rates[[1]])))
+  expect_true(all(is.finite(ds$lgamma_y1)))
+  expect_true(is.finite(jm_negll_cpp(th, ds)))
+  # expected counts must come from the same C++ the likelihood uses
+  expect_equal(jm_fitted_cpp(th, ds)$mu[[1]], jm_fitted_cpp(th, d)$mu[[1]])
+})
+
+test_that("the driver truth constructor really encodes the driver effect it claims", {
+  source(here::here("code/07_joint_model/joint_recovery.R"))
+  S <- d$n_season
+  x <- seq_len(S) %% 2
+  set.seed(9)
+  tt <- jm_truth_with_driver(d, x, beta_R0 = 0.10, beta_delta = 0.40, noise_R0 = 0, noise_delta = 0)
+  dr <- attr(tt, "driver")
+  expect_equal(dr$beta_R0, 0.10); expect_equal(dr$beta_delta, 0.40)
+  # with the noise switched off, regressing the truth back on the covariate returns the slopes exactly
+  expect_equal(unname(coef(lm(tt[seq_len(S)] ~ dr$x))[2]), 0.10, tolerance = 1e-8)
+  p <- jm_unpack(tt, d)
+  expect_equal(unname(coef(lm(p$delta ~ dr$x))[2]), 0.40, tolerance = 1e-8)
+  expect_equal(sum(p$delta), 0, tolerance = 1e-10)         # the constraint still holds
+})
+
+test_that("curvature intervals contain the estimate and cover the constrained deviation", {
+  source(here::here("code/07_joint_model/joint_recovery.R"))
+  small <- jm_fit(d, max_sweeps = 2L, cores = 1, verbose = FALSE)
+  iv <- jm_intervals(small)
+  expect_true(all(iv$lower <= iv$estimate + 1e-9))
+  expect_true(all(iv$estimate <= iv$upper + 1e-9))
+  # every free parameter, plus one extra row for the deviation that is minus the sum of the others
+  expect_equal(nrow(iv), length(small$theta) + 1L)
+  expect_true(paste0("delta_", d$seasons[d$n_season]) %in% iv$parameter)
+})

@@ -1,4 +1,4 @@
-# run_joint_model.R -- fit the joint model to every country with at least 6 age-complete seasons,
+# run_joint_model.R -- fit the joint model to every country with at least 5 age-complete seasons,
 # then write the diagnostics and the figures. See MODEL.md for what the model assumes.
 #   Rscript code/07_joint_model/run_joint_model.R
 setwd(here::here())
@@ -6,17 +6,22 @@ suppressMessages(source("code/01_main_supporting/setup.R"))
 source("code/01_main_supporting/stitch_iliplus.R"); source("code/01_main_supporting/sir_core.R")
 source("code/06_comp_model/contact_matrix.R"); source("code/06_comp_model/comp_model_settings.R")
 source("code/06_comp_model/comp_model_core.R"); source("code/06_comp_model/comp_model_data.R")
-source("code/07_joint_model/joint_model.R"); source("code/07_joint_model/joint_report.R")
+source("code/07_joint_model/joint_model.R"); source("code/07_joint_model/joint_recovery.R")
+source("code/07_joint_model/joint_report.R")
 
 t_compile = system.time(jm_load_cpp())[["elapsed"]]
 models_in = readRDS("output/models_in.rds"); load("output/demography_respicast.Rdata"); demo = obj
 
-# every country the panel can age-structure; jm_build_data drops those with fewer than 6 seasons
+# every country the panel can age-structure; jm_build_data drops those with too few seasons
 candidates = c("DK", "EE", "ES", "FR", "NO", "BE", "CZ", "IE", "IT", "PL", "HR", "NL")
-d = jm_build_data(candidates, models_in, demo, min_seasons = 6L)
+d = jm_build_data(candidates, models_in, demo, min_seasons = 5L)   # 5 keeps Spain in (owner, 2026-09-12)
 
 cat("\n--- fitting ---\n")
 fit = jm_fit(d, cores = max(1L, parallel::detectCores() - 1L))
+
+cat("\n--- uncertainty: curvature intervals ---\n")
+iv = jm_intervals(fit)
+print(head(iv[, c("parameter","estimate","lower","upper")], 20), row.names = FALSE)
 
 cat("\n--- identifiability ---\n")
 id = jm_identifiability(fit)
@@ -36,7 +41,7 @@ print(jm_summary_season(fit), row.names = FALSE)
 print(jm_summary_country(fit), row.names = FALSE)
 
 dir.create("output/joint_model", showWarnings = FALSE, recursive = TRUE)
-saveRDS(list(fit = fit, id = id, adequacy = ad, compile_seconds = t_compile),
+saveRDS(list(fit = fit, id = id, adequacy = ad, intervals = iv, compile_seconds = t_compile),
         "output/joint_model/joint_fit.rds")
 cat("\n--- figures ---\n")
 save_jm_report(fit, id)
