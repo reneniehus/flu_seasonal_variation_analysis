@@ -206,17 +206,21 @@ jm_simulate = function(theta, d, seed = NULL){
 jm_recover_once = function(d, theta_true, seed, fit_args = list(), with_intervals = TRUE, verbose = FALSE){
   ds = jm_simulate(theta_true, d, seed)
   fit = do.call(jm_fit, c(list(d = ds, theta0 = jm_theta0(ds), verbose = verbose), fit_args))
-  iv = if (with_intervals) jm_intervals(fit) else NULL
+  iv = jm_intervals(fit)
   nm = jm_par_names(d)
-  # compare on the model's own scale (exp / logis / 2^), which is what gets reported
-  kind = if (!is.null(iv)) iv$kind else jm_intervals(fit)$kind
+  # jm_intervals returns one row per FREE parameter plus one derived row for the constrained season
+  # deviation, so it must be matched BY NAME rather than by position -- assuming equal lengths is how
+  # this silently broke once already.
+  ivm = iv[match(nm, iv$parameter), ]
+  stopifnot(!anyNA(ivm$kind))
+  kind = ivm$kind
   tr = function(x, k) ifelse(k == "exp", exp(x), ifelse(k == "plogis", plogis(x), ifelse(k == "pow2", 2^x, x)))
   out = data.frame(parameter = nm, seed = seed,
                    truth_theta = unname(theta_true), est_theta = unname(fit$theta),
                    truth = tr(unname(theta_true), kind), estimate = tr(unname(fit$theta), kind),
                    row.names = NULL, stringsAsFactors = FALSE)
-  if (!is.null(iv)){ out$lower = iv$lower; out$upper = iv$upper
-    out$covered = out$truth >= pmin(iv$lower, iv$upper) & out$truth <= pmax(iv$lower, iv$upper) }
+  if (with_intervals){ out$lower = ivm$lower; out$upper = ivm$upper
+    out$covered = out$truth >= pmin(ivm$lower, ivm$upper) & out$truth <= pmax(ivm$lower, ivm$upper) }
   list(comparison = out, negll = fit$negll, loglik = fit$loglik, seconds = fit$seconds,
        conv = c(fit$conv_local, fit$conv_shared, fit$conv_polish), theta = fit$theta)
 }
