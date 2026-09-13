@@ -1,5 +1,6 @@
-# The joint model must mean the same thing in both implementations, and its parameter vector must be
-# wired correctly. Three things are checked, in rough order of how much damage they would do:
+# The joint model must mean the same thing in both implementations, its parameter vector must be wired
+# correctly, and the optimiser's guards must actually work. In rough order of how much damage a failure
+# would do:
 #   1. the C++ log-posterior equals an independent base-R implementation of the same model to 1e-10,
 #      at the starting point and at random perturbations. The R version is written from the maths and
 #      uses R's own eigen() for the spectral radius, so agreement means both are right rather than
@@ -8,7 +9,15 @@
 #      sum-to-zero constraint on the season deviations holds;
 #   3. no parameter is DEAD -- the objective responds to each one. The compartmental pilot shipped an
 #      inert baseline slot for countries with only one data source, which made its Hessian exactly
-#      singular; this test would have caught it.
+#      singular; this test would have caught it;
+#   4. the dynamics realise the R0 they are given, which is what the contact rescaling is for;
+#   5. the recovery harness simulates from the same code it fits, onto the real design, and the driver
+#      truth constructor encodes the slope it claims -- otherwise the recovery test is vacuous;
+#   6. a rejected parameter vector is rejected by EVERY entry point rather than scored, and every
+#      export checks theta's length before reading it;
+#   7. the flat-line protector detects whole and partial flat lines, rescues them, never makes an
+#      objective worse, leaves a healthy fit untouched, and reports a check that describes the theta
+#      jm_fit actually returns.
 # Skipped offline when the cached model inputs are absent, so run_tests.R stays runnable.
 
 skip_if_not_installed("Rcpp")

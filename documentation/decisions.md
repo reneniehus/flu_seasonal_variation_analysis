@@ -561,8 +561,9 @@ cells are exactly zero and the pilot's fitted dispersion put 15% of its predicti
 spent 42% of each objective in R glue and 28% building trajectories the optimiser discarded). No filter
 means no Jacobian, which is most of why the core is short. Fitting exploits separability: only 16 of 184
 parameters are shared across countries, so block coordinate descent optimises all 12 country blocks in
-parallel, then the shared block, then polishes jointly. 116 s for the full fit; the C++ is ~1750x the
-base-R reference it is tested against.
+parallel, then the shared block, then polishes jointly. 116 s for the full fit as first built, ~170 s
+once the multi-start and the flat-line protector were added (2026-09-13); the C++ is ~1750x the base-R
+reference it is tested against.
 
 **Two optimiser findings that cost real time.**
 1. Each country's local block has a SECOND, WRONG OPTIMUM: let the dispersion collapse and the negative

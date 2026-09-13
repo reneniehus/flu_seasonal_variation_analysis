@@ -6,7 +6,13 @@
 # country. A flat finite-difference gradient over ~184 parameters costs 185 full-likelihood
 # evaluations; a block sweep costs about 33, because a country's own likelihood is a twelfth of the
 # joint one. So we alternate: every country's local block optimised in parallel with the shared block
-# held fixed, then the shared block with the locals held fixed, to convergence, then one joint polish.
+# held fixed, then the shared block with the locals held fixed, repeated, then one joint polish.
+#
+# Two guards sit inside that loop, each because the failure it prevents actually happened. Every local
+# block is MULTI-STARTED, because a block has a second optimum in which the dispersion collapses and
+# the country flat-lines at its baseline instead of fitting a wave. And the FLAT-LINE PROTECTOR
+# (jm_flat_check / jm_unflatten) runs before and after the polish, so the returned fit is always
+# checked; see those functions for what it detects and what it refuses to do.
 
 suppressMessages({library(Rcpp); library(dplyr)})
 

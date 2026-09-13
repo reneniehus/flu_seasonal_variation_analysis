@@ -1,6 +1,6 @@
 # joint_report.R -- THE DEFAULT FIGURE SET for the joint model.
 #
-# The set is numbered and answers three questions in order, so a reader can walk it front to back:
+# The set is numbered and answers four questions in order, so a reader can walk it front to back:
 #   HOW THE MODEL WORKS       01 what varies where, 02 how a wave's arrival is set
 #   WHAT DATA IT FITS         03 every country-season, 04 one country by age, 05 the noise budget
 #   WHAT IT LEARNS            06 season transmissibility, 07 season visibility, 08 country

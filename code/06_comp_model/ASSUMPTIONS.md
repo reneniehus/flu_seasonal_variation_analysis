@@ -13,6 +13,15 @@ The machine-readable counterpart is `code/06_comp_model/comp_model_settings.R`; 
 
 ---
 
+> **This file documents the PILOT, not the working model.** The model now in use is
+> `code/07_joint_model/` -- see its `MODEL.md` for what it assumes and
+> `documentation/decisions.md` (2026-09-12) for why it is simpler. Several assumptions below were
+> deliberately changed or dropped there: the Kalman filter and its process noise are gone, the
+> observation is negative-binomial rather than Gaussian, the season reporting deviation is shared
+> across countries and constrained to average one, and `R0_s` is shared so susceptibility is
+> identified by pooling rather than by a tight prior. This record is kept because it carries the
+> provenance and the evidence for each choice, and because the pilot's data layer is still used.
+
 ## 0. Purpose
 
 A mechanistic, age- and vaccination-structured SIR that summarises every country-season by an

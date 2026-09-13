@@ -85,10 +85,34 @@ after the seed, no latent period, single strain.
 negative-binomial likelihood, and the priors. One call from R returns one number, so no per-evaluation
 R overhead. `joint_model.R` assembles the data, packs and unpacks the parameter vector and drives the
 fit by **block coordinate descent**: each country's local block is optimised with the shared block
-fixed, all twelve in parallel, then the shared block is optimised with the locals fixed, repeated to
-convergence and finished with a joint polish. That exploits the separability above: a country's own
-likelihood is a twelfth of the joint one, so a sweep costs about 33 full-likelihood evaluations against
-185 for one finite-difference gradient of the flat problem.
+fixed, all twelve in parallel, then the shared block is optimised with the locals fixed, repeated and
+finished with a joint polish. That exploits the separability above: a country's own likelihood is a
+twelfth of the joint one, so a sweep costs about 33 full-likelihood evaluations against 185 for one
+finite-difference gradient of the flat problem. About 170 s for the full 12-country fit.
+
+Two things guard the optimiser, both of them there because the failure they prevent actually happened.
+
+**Multi-start on every local block.** Each country's block has a second, WRONG optimum: let the
+dispersion collapse and the negative binomial becomes so diffuse that every curve fits about equally
+well, so nothing pushes the model to place a wave and the country flat-lines at its baseline. The
+first joint fit lost the Netherlands that way. It is an optimiser failure, not a fact about the data --
+a harder search found a solution 406 nats better. Each block is therefore started from three points
+(the warm start, the same with the dispersion pinned at the value that country's own week-to-week
+scatter implies, and that plus an earlier arrival) and the best is kept. The block is also seeded with
+the value it came in with, so it can never be written back worse.
+
+**The flat-line protector** (`jm_flat_check`, `jm_unflatten`) runs inside `jm_fit`, before and after
+the polish, so the returned fit is always checked. Detection is MECHANISTIC rather than
+goodness-of-fit based, because a country can fit badly for honest reasons but cannot have an epidemic
+that never happened: the trigger is the attack rate collapsing (threshold 0.03 against a measured
+minimum of 0.27 across the twelve countries) or the fitted peak being almost all baseline (0.15
+against a measured 0.99). Per-season columns are reported too, and a PARTIAL flat line triggers when
+one season is flat while at least two others are healthy -- without that, three of the Netherlands'
+six seasons could flat-line invisibly at a cost of 3084 nats. A rescue is adopted only when it
+improves that country's objective; if the flat solution still wins after the whole escape ladder it is
+reported as UNRESOLVED rather than papered over, because that means the series carries no identifiable
+wave and forcing one would hide a finding about the data. Residual risk, measured on the recovery
+replicates: roughly 1-2% per country-fit, and detectable rather than silent.
 
 ## Does it recover a known truth? (measured 2026-09-12)
 
