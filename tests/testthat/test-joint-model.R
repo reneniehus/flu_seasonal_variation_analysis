@@ -139,3 +139,60 @@ test_that("curvature intervals contain the estimate and cover the constrained de
   expect_equal(nrow(iv), length(small$theta) + 1L)
   expect_true(paste0("delta_", d$seasons[d$n_season]) %in% iv$parameter)
 })
+
+test_that("the flat-line protector detects a flat fit, escapes it, and leaves a healthy one alone", {
+  # The guarded failure: a country's local block has a second optimum in which the dispersion
+  # collapses, the negative binomial becomes diffuse enough that any curve fits, and the country sits
+  # at its baseline for every season. It cost the Netherlands in the first joint fit and a harder
+  # search later found a solution 406 nats better, so it is an optimiser failure, not a fact.
+  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
+  fit <- readRDS(here::here("output/joint_model/joint_fit.rds"))$fit
+  dd <- fit$d; bl <- jm_blocks(dd)
+
+  # (a) the detector must not fire on a healthy fit, and with real margin, not marginally
+  chk <- jm_flat_check(fit$theta, dd)
+  expect_false(any(chk$flat))
+  expect_gt(min(chk$attack_max), 0.15)        # threshold is 0.03: at least a 5x margin
+  expect_gt(min(chk$peak_epi_frac), 0.75)     # threshold is 0.15
+
+  # (b) slot 5 of every local block really is the dispersion, which jm_unflatten relies on
+  nm <- jm_par_names(dd)
+  for (ic in seq_len(dd$n_country)) expect_match(nm[bl$local[[ic]][5]], ":log_phi$")
+
+  # (c) break one country deliberately, two ways, and require the detector to fire
+  ic <- 3L; idx <- bl$local[[ic]]
+  i_seed <- 5L + dd$n_src[ic] + seq_len(dd$n_cs_of_country[ic])
+  broken <- list(kill_susceptibility = local({ t <- fit$theta; t[idx[1]] <- qlogis(0.001); t[idx[5]] <- log(0.02); t }),
+                 tiny_seeds          = local({ t <- fit$theta; t[idx[i_seed]] <- log(1e-30); t }))
+  for (nmb in names(broken)){
+    tb <- broken[[nmb]]
+    expect_true(jm_flat_check(tb, dd)$flat[ic], info = nmb)
+    # (d) the protector must rescue it, and must only ever adopt an IMPROVEMENT
+    before <- jm_country_negll_cpp(tb, dd, ic - 1L)
+    prot <- jm_unflatten(tb, dd, cores = 1, verbose = FALSE)
+    after <- jm_country_negll_cpp(prot$theta, dd, ic - 1L)
+    expect_lte(after, before + 1e-6)                          # never worse
+    expect_lte(jm_negll_cpp(prot$theta, dd), jm_negll_cpp(tb, dd) + 1e-6)
+    expect_false(prot$check$flat[ic], info = nmb)              # and actually rescued
+    expect_equal(prot$n_fixed, 1L)
+  }
+
+  # (e) on a healthy fit it must be a no-op, not a small perturbation
+  p0 <- jm_unflatten(fit$theta, dd, cores = 1, verbose = FALSE)
+  expect_equal(unname(p0$theta), unname(fit$theta))
+  expect_equal(nrow(p0$report), 0L)
+  expect_equal(p0$n_unresolved, 0L)
+})
+
+test_that("the data-implied dispersion is one definition used everywhere", {
+  # jm_phi_data feeds the adequacy diagnostic, the multi-start and the protector; if the three ever
+  # disagree the noise-budget figure stops meaning what it says
+  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
+  fit <- readRDS(here::here("output/joint_model/joint_fit.rds"))$fit
+  phid <- jm_phi_data(fit$d)
+  expect_length(phid, fit$d$n_country)
+  expect_true(all(is.finite(phid) & phid > 0))
+  ad <- jm_adequacy(fit)
+  expect_equal(ad$phi_data, phid, tolerance = 1e-10)     # the diagnostic uses the same numbers
+  expect_equal(ad$cv_data, 1 / sqrt(phid), tolerance = 1e-10)
+})
