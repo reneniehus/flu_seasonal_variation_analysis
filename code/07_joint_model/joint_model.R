@@ -461,7 +461,7 @@ jm_negll_R = function(th, d){
          dn(th[base + 5], d$pr_phi_mean, d$pr_phi_sd) +
          sum(dn(th[base + 5 + seq_len(nsrc)], d$pr_b_mean, d$pr_b_sd))
   }
-  -lp
+  unname(-lp)              # a log-posterior is a scalar: strip the name lp inherits from theta
 }
 
 # ---- |-convergence and identifiability indicators ----
