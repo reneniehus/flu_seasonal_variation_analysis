@@ -78,8 +78,13 @@ static inline void simulate_season(int n_weeks, const double Cs[A][A], double be
         lam[a] = beta * s;
       }
       for (int a = 0; a < A; ++a){
-        const double nu = lam[a] * Su[a];         // new infections, unvaccinated
-        const double nv = e_inf * lam[a] * Sv[a]; // ... and vaccinated, who are partly protected
+        // cap the flow at what the pool holds: without this the accumulator banks infections that
+        // imply a negative S_u, which the clamp below then silently undoes, so the weekly
+        // observation could exceed the supply while attack[] stayed correctly bounded
+        double nu = lam[a] * Su[a];               // new infections, unvaccinated
+        double nv = e_inf * lam[a] * Sv[a];       // ... and vaccinated, who are partly protected
+        if (nu > Su[a]) nu = Su[a];
+        if (nv > Sv[a]) nv = Sv[a];
         Su[a] -= nu;  Iu[a] += nu - gamma * Iu[a];
         Sv[a] -= nv;  Iv[a] += nv - gamma * Iv[a];
         acc[a] += nu + w_ili * nv;                // vaccinated infections are less likely to be ILI
@@ -99,6 +104,13 @@ static inline void simulate_season(int n_weeks, const double Cs[A][A], double be
   for (int a = 0; a < A; ++a) attack[a] = S0 - Su[a] - Sv[a];
 }
 
+// F1: every export must check the length before any read. country_lp indexes up to exactly n_par-1
+// for the last country, so there is no slack and a short theta reads adjacent memory.
+static inline void check_len(const NumericVector& theta, const List& d){
+  if (theta.size() != as<int>(d["n_par"]))
+    stop("theta has the wrong length: %d supplied, %d expected", theta.size(), as<int>(d["n_par"]));
+}
+
 static inline double dnorm_log(double x, double m, double s){
   const double z = (x - m) / s;
   return -0.5 * z * z - std::log(s) - 0.5 * LOG_2PI;
@@ -109,6 +121,15 @@ struct Shared {
   std::vector<double> R0, dev;                  // dev[s] = exp(delta_s), the reporting multiplier
   double sigma_eld;
 };
+// finiteness of the TRANSFORMED shared values. theta = 800 is a finite number whose exp() is Inf,
+// which then produced Inf*0 = NaN inside the dynamics, so checking theta alone is not enough.
+static inline bool shared_ok(const Shared& sh){
+  if (!R_finite(sh.sigma_eld) || sh.sigma_eld <= 0.0) return false;
+  for (size_t s = 0; s < sh.R0.size(); ++s)
+    if (!R_finite(sh.R0[s]) || sh.R0[s] < 0.0 || !R_finite(sh.dev[s]) || sh.dev[s] < 0.0) return false;
+  return true;
+}
+
 static inline Shared read_shared(const double* th, int S){
   Shared sh; sh.R0.resize(S); sh.dev.resize(S);
   double sum_free = 0.0;
@@ -160,7 +181,11 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   const double sig[A] = {1.0, 1.0, sh.sigma_eld};
   for (int a = 0; a < A; ++a) for (int j = 0; j < A; ++j) Cs[a][j] = sig[a] * Cn(a, j);
   const double rho = spectral_radius3(Cs);
-  if (!(rho > 0.0) || !R_finite(rho)) return R_NegInf;
+  if (!(rho > 0.0) || !R_finite(rho)){
+    // write an empty result first: the want_fit caller indexes fit_out unconditionally
+    if (want_fit) *fit_out = List::create(_["mu"] = List(0), _["attack"] = NumericMatrix(0, A));
+    return R_NegInf;
+  }
   for (int a = 0; a < A; ++a) for (int j = 0; j < A; ++j) Cs[a][j] /= rho;
 
   const double lg_phi = std::lgamma(phi), log_phi = std::log(phi);
@@ -191,7 +216,8 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
       const double floor_a = b * N[a] / rate_per;        // the off-season floor of the observed series
       for (int t = 0; t < nw; ++t){
         double mu = scale * inc[t + a * nw] + floor_a;
-        if (!(mu > 1e-10)) mu = 1e-10;
+        if (ISNAN(mu)) return R_NegInf;           // reject a NaN trajectory; do not floor it
+        if (mu < 1e-10) mu = 1e-10;               // and floor a genuinely tiny mean
         if (want_fit) mu_m(t, a) = mu;
         const double yy = y(t, a);
         if (ISNAN(yy)) continue;
@@ -238,11 +264,11 @@ static double shared_lp(const double* th, const List& d, int S){
 // [[Rcpp::export]]
 double jm_negll_cpp(NumericVector theta, List d){
   const int S = as<int>(d["n_season"]), C = as<int>(d["n_country"]);
+  check_len(theta, d);
   const double* th = theta.begin();
-  if (theta.size() != as<int>(d["n_par"])) stop("theta has the wrong length");
   for (int i = 0; i < theta.size(); ++i) if (!R_finite(th[i])) return 1e10;
   const Shared sh = read_shared(th, S);
-  if (!R_finite(sh.sigma_eld) || sh.sigma_eld <= 0.0) return 1e10;
+  if (!shared_ok(sh)) return 1e10;
   double lp = shared_lp(th, d, S);
   for (int ic = 0; ic < C; ++ic){
     const double v = country_lp(th, d, ic, sh, false, nullptr);
@@ -258,10 +284,12 @@ double jm_negll_cpp(NumericVector theta, List d){
 // [[Rcpp::export]]
 double jm_country_negll_cpp(NumericVector theta, List d, int ic){
   const int S = as<int>(d["n_season"]);
+  check_len(theta, d);
+  if (ic < 0 || ic >= as<int>(d["n_country"])) stop("country index out of range");
   const double* th = theta.begin();
   for (int i = 0; i < theta.size(); ++i) if (!R_finite(th[i])) return 1e10;
   const Shared sh = read_shared(th, S);
-  if (!R_finite(sh.sigma_eld) || sh.sigma_eld <= 0.0) return 1e10;
+  if (!shared_ok(sh)) return 1e10;
   const double v = country_lp(th, d, ic, sh, false, nullptr);
   if (!R_finite(v)) return 1e10;
   return -v;
@@ -272,9 +300,15 @@ double jm_country_negll_cpp(NumericVector theta, List d, int ic){
 // [[Rcpp::export]]
 double jm_loglik_cpp(NumericVector theta, List d){
   const int S = as<int>(d["n_season"]), C = as<int>(d["n_country"]);
+  check_len(theta, d);
   const double* th = theta.begin();
   const Shared sh = read_shared(th, S);
-  double ll = -jm_negll_cpp(theta, d);                 // posterior
+  if (!shared_ok(sh)) return R_NegInf;
+  const double nl = jm_negll_cpp(theta, d);
+  // PROPAGATE the rejection instead of stripping priors off the sentinel: subtracting a log-prior
+  // from 1e10 yields a finite number that looks exactly like a log-likelihood
+  if (nl >= 1e10) return R_NegInf;
+  double ll = -nl;                                     // posterior
   ll -= shared_lp(th, d, S);                           // strip the shared priors
   // strip every local prior by recomputing them
   const IntegerVector n_src = d["n_src"], off_country = d["off_country"];
@@ -300,8 +334,12 @@ double jm_loglik_cpp(NumericVector theta, List d){
 // [[Rcpp::export]]
 List jm_fitted_cpp(NumericVector theta, List d){
   const int S = as<int>(d["n_season"]), C = as<int>(d["n_country"]);
+  check_len(theta, d);
   const double* th = theta.begin();
   const Shared sh = read_shared(th, S);
+  if (!shared_ok(sh))
+    stop("cannot compute fitted values: the shared block is not usable (R0, the season deviations "
+         "or the elderly susceptibility is non-finite or negative)");
   const List cs_of_country = d["cs_of_country"];
   const int n_cs = as<int>(d["n_cs"]);
   List mu_all(n_cs); NumericMatrix attack_all(n_cs, A);

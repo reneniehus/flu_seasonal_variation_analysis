@@ -196,3 +196,85 @@ test_that("the data-implied dispersion is one definition used everywhere", {
   expect_equal(ad$phi_data, phid, tolerance = 1e-10)     # the diagnostic uses the same numbers
   expect_equal(ad$cv_data, 1 / sqrt(phid), tolerance = 1e-10)
 })
+
+test_that("the C++ and R implementations agree where the pool cap BINDS, not just at sane parameters", {
+  # The cap (flow limited to what S_u holds) only engages when lambda > 1 in a day, i.e. around
+  # R0 > 6. The identity test at fitted values therefore passed for a while with the cap present in
+  # C++ and absent in R. This exercises the regime where they could differ.
+  for (R0 in c(1.5, 6.5, 10, 40)){
+    t2 <- th; t2[seq_len(d$n_season)] <- log(R0)
+    expect_equal(jm_negll_cpp(t2, d), jm_negll_R(t2, d), tolerance = 1e-9,
+                 info = paste("R0 =", R0))
+  }
+  # and the invariant the cap restores: nobody can be infected more than once
+  t3 <- th; t3[seq_len(d$n_season)] <- log(40)
+  f <- jm_fitted_cpp(t3, d)
+  for (i in seq_len(d$n_cs)){
+    S0 <- plogis(t3[jm_blocks(d)$local[[d$cs_country[i] + 1L]][1]])
+    expect_lte(max(f$attack[i, ]), S0 + 1e-9)
+  }
+})
+
+test_that("a rejected parameter vector is rejected by every entry point, not scored", {
+  S <- d$n_season
+  bad <- list(
+    "sigma overflows"  = local({ t <- th; t[2L * S] <- 1030; t }),
+    "R0 overflows"     = local({ t <- th; t[seq_len(S)] <- 800; t[grep(":log_I0", names(th))] <- -800; t }),
+    "one R0 overflows" = local({ t <- th; t[1] <- 800; t }))
+  for (nm in names(bad)){
+    t2 <- bad[[nm]]
+    # the objective must return its sentinel, never a finite value that looks like a better fit
+    expect_gte(jm_negll_cpp(t2, d), 1e10, label = nm)
+    # and the log-likelihood must PROPAGATE that, not strip priors off the sentinel and return ~-1e10
+    expect_false(is.finite(jm_loglik_cpp(t2, d)), label = nm)
+  }
+  # fitted values cannot be computed there, and must say why rather than dying on an empty List
+  e <- try(jm_fitted_cpp(bad[["sigma overflows"]], d), silent = TRUE)
+  expect_s3_class(e, "try-error")
+  expect_match(conditionMessage(attr(e, "condition")), "shared block")
+})
+
+test_that("every exported entry point checks the length of theta before reading it", {
+  # country_lp indexes up to exactly n_par - 1 for the last country, so a short theta reads the
+  # memory next to the R vector and returns a plausible number
+  short <- th[seq_len(length(th) - 1L)]
+  expect_error(jm_negll_cpp(short, d), "wrong length")
+  expect_error(jm_country_negll_cpp(short, d, 0L), "wrong length")
+  expect_error(jm_loglik_cpp(short, d), "wrong length")
+  expect_error(jm_fitted_cpp(short, d), "wrong length")
+  expect_error(jm_country_negll_cpp(th, d, d$n_country), "out of range")
+})
+
+test_that("a PARTIAL flat line is detected and rescued, and a low-attack design is not false-flagged", {
+  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
+  fit <- readRDS(here::here("output/joint_model/joint_fit.rds"))$fit
+  dd <- fit$d; bl <- jm_blocks(dd)
+  ic <- which(dd$countries == "NL"); if (!length(ic)) ic <- 1L
+  i_seed <- bl$local[[ic]][5L + dd$n_src[ic] + seq_len(dd$n_cs_of_country[ic])]
+  n_flat <- max(1L, floor(length(i_seed) / 2))
+  tp <- fit$theta; tp[i_seed[seq_len(n_flat)]] <- -60          # half this country's seasons flat-lined
+  cp <- jm_flat_check(tp, dd)
+  expect_true(cp$flat[ic])                                     # the max over seasons would have hidden it
+  expect_equal(cp$n_seasons_flat[ic], n_flat)
+  expect_gte(cp$n_seasons_healthy[ic], 2L)
+  prot <- jm_unflatten(tp, dd, cores = 1, verbose = FALSE)
+  expect_lt(jm_negll_cpp(prot$theta, dd), jm_negll_cpp(tp, dd))
+  expect_false(prot$check$flat[ic])
+  # the partial trigger must need HEALTHY seasons too, so a uniformly low-attack design is spared
+  tl <- fit$theta; tl[bl$local[[ic]][1]] <- qlogis(0.02)       # every season small, none anomalous
+  cl <- jm_flat_check(tl, dd, attack_min = 1e-6)
+  expect_false(cl$flat_partial[ic])
+})
+
+test_that("jm_fit's reported flat check describes the theta it actually returns", {
+  # The bug: the post-polish rescue was adopted only if it CLEARED the threshold, while the reported
+  # check was computed on the rescued vector either way -- so fit$flat could describe a vector that
+  # fit$theta was not. Worth 5648 nats in the measured case.
+  small <- jm_fit(d, max_sweeps = 2L, cores = 1, verbose = FALSE)
+  expect_equal(jm_flat_check(small$theta, d, small$flat_thresholds[["attack_min"]],
+                             small$flat_thresholds[["epi_frac_min"]])$flat,
+               small$flat$flat)
+  expect_equal(small$n_flat_unresolved, sum(small$flat$flat))
+  expect_true(is.logical(small$converged))
+  expect_named(small$flat_thresholds, c("attack_min", "epi_frac_min"))
+})

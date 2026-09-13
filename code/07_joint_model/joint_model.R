@@ -49,11 +49,29 @@ jm_load_cpp = function(dir = "output/joint_model/cpp_cache"){
 # Counts are ROUNDED here: the panel holds rates, the count scale is a device (MODEL.md), and the
 # negative binomial wants integers.
 jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_seasons = 6L, verbose = TRUE){
+  if (anyDuplicated(countries)){                     # cds[[cc]] assigns by NAME, so a repeated code
+    dup = unique(countries[duplicated(countries)])   # would overwrite and the design silently shrink
+    if (verbose) cat("  dropping duplicate country code(s):", paste(dup, collapse = ", "), "\n")
+    countries = unique(countries)
+  }
   cds = list()
   for (cc in countries){
     cd = tryCatch(build_comp_data(cc, models_in, demo, comp_model_settings()), error = function(e) NULL)
     if (is.null(cd)){ if (verbose) cat("  skip", cc, "(no data)\n"); next }
-    if (length(cd$seasons) < min_seasons){ if (verbose) cat("  skip", cc, sprintf("(%d seasons < %d)\n", length(cd$seasons), min_seasons)); next }
+    # PRUNE unusable seasons before anything counts them. A season with no finite observation
+    # contributes nothing to the likelihood but would still claim a seed slot that no country-season
+    # references (a dead parameter) and would break the data-driven starting values, since the
+    # quantile of an empty set is NA. This has to happen before n_local and off_country are computed.
+    keep = which(vapply(cd$y, function(m) any(is.finite(m)), logical(1)))
+    if (length(keep) < length(cd$seasons)){
+      if (verbose) cat("  ", cc, ": dropping", length(cd$seasons) - length(keep),
+                       "season(s) with no finite observation\n")
+      cd$seasons = cd$seasons[keep]; cd$y = cd$y[keep]; cd$rates = cd$rates[keep]
+      cd$vax = cd$vax[keep, , drop = FALSE]
+      cd$source_by_season = cd$source_by_season[keep]
+      if (!is.null(cd$n_weeks)) cd$n_weeks = cd$n_weeks[keep]
+    }
+    if (length(cd$seasons) < min_seasons){ if (verbose) cat("  skip", cc, sprintf("(%d usable seasons < %d)\n", length(cd$seasons), min_seasons)); next }
     cds[[cc]] = cd
   }
   stopifnot(length(cds) > 0)
@@ -138,21 +156,35 @@ jm_theta0 = function(d, set = jm_settings()){
     base = d$off_country[ic]
     ics = d$cs_of_country[[ic]] + 1L
     rate_all = unlist(lapply(ics, function(i) as.numeric(d$rates[[i]])))
-    peak = max(rate_all, na.rm = TRUE)
-    floor_r = max(as.numeric(quantile(rate_all[rate_all > 0], 0.10, na.rm = TRUE)), 1e-3)
+    peak = max(c(rate_all, 0), na.rm = TRUE)
+    # na.rm on the OUTER max as well: the quantile of an empty positive set is NA, and max(NA, 1e-3)
+    # is NA, which would put NA into log_b and leave that whole block silently un-optimised
+    floor_r = max(c(as.numeric(quantile(rate_all[rate_all > 0], 0.10, na.rm = TRUE)), 1e-3), na.rm = TRUE)
     c0 = min(max(peak / d$rate_per / 0.02, 1e-4), 1)
     th[base + 1] = qlogis(0.80)
     th[base + 2] = log(c0)
     th[base + 3] = 0; th[base + 4] = 0
     th[base + 5] = set$pr_phi_mean
     th[base + 5 + seq_len(d$n_src[ic])] = log(floor_r)
-    # the seed start comes from the OBSERVED onset: at growth rate r0 the default seed reaches onset
-    # around week 12, so a season whose pooled rate first passes 10% of its peak in week o is shifted
-    # by (o - 12) weeks. This is the only handle on arrival time, so a good start matters.
+    # The seed start comes from the OBSERVED onset: at growth rate r0 the default seed reaches onset
+    # around week 12, so a season whose wave crosses 10% of its peak in week o is shifted by (o - 12)
+    # weeks. Three things make it ROBUST, because the naive version was set by a single early spike
+    # (DK 2025/2026 had a week-2 value of 19.5 against a peak of 128, which put onset at 2 and the
+    # seed start 8.6 log units from its fitted value): the off-season floor is subtracted first, the
+    # crossing is tested on a 3-week mean so one week cannot trigger it, and the result is clamped to
+    # a plausible window. Measured: this start and a flat one at the prior mean converge to the same
+    # optimum, so it buys speed and robustness rather than the answer.
     onset = vapply(ics, function(i){
       m = d$rates[[i]]; tot = rowSums(sweep(m, 2, d$N[[ic]] / sum(d$N[[ic]]), "*"), na.rm = TRUE)
       tot[rowSums(is.finite(m)) == 0] = NA
-      w = which(tot >= 0.1 * max(tot, na.rm = TRUE))[1]; if (is.na(w)) 12 else w }, numeric(1))
+      if (!any(is.finite(tot))) return(12)
+      z = tot - as.numeric(quantile(tot, 0.10, na.rm = TRUE))     # above the off-season floor
+      n = length(z); sm = rep(NA_real_, n)                        # 3-week mean, NA-tolerant
+      for (k in seq_len(n)){ w = z[max(1, k - 1):min(n, k + 1)]; if (all(is.finite(w))) sm[k] = mean(w) }
+      pk = max(sm, na.rm = TRUE)
+      if (!is.finite(pk) || pk <= 0) return(12)
+      w = which(sm >= 0.1 * pk)[1]
+      if (is.na(w)) 12 else min(max(w, 4), 34) }, numeric(1))
     th[base + 5 + d$n_src[ic] + seq_along(ics)] = set$pr_I0_mean - r0 * 7 * (onset - 12)
   }
   names(th) = jm_par_names(d)
@@ -194,6 +226,13 @@ jm_phi_data = function(d){
 #                  over the season. A flat line is all baseline.
 # phi_ratio (fitted dispersion over the data-implied one) is reported as CONTEXT, not as a trigger:
 # a low value is the mechanism of the failure but is also seen in countries that fit fine.
+# Aggregating over seasons HIDES a minority of flat ones: the seed is per country-season while the
+# dispersion is per country, so a single wave can flat-line alone, and neither a max over attack rates
+# nor a median over epidemic fractions will see it (measured: 3 of the Netherlands' 6 seasons flat left
+# the country unflagged while costing 3084 nats). So the per-season minima are reported, and a PARTIAL
+# flat line triggers too -- but only when the country demonstrably CAN have epidemics, i.e. at least
+# two of its other seasons are healthy. Without that condition a design whose attack rates are
+# genuinely small everywhere, as the driver-recovery truths can be, would false-positive.
 jm_flat_check = function(th, d, attack_min = 0.03, epi_frac_min = 0.15){
   f = jm_fitted_cpp(th, d); p = jm_unpack(th, d); phid = jm_phi_data(d)
   rows = lapply(seq_len(d$n_country), function(ic){
@@ -204,12 +243,17 @@ jm_flat_check = function(th, d, attack_min = 0.03, epi_frac_min = 0.15){
     cors = vapply(ics, function(i){ y = as.numeric(d$y[[i]]); m = as.numeric(f$mu[[i]])
       ok = is.finite(y) & is.finite(m); if (sum(ok) > 3) suppressWarnings(cor(y[ok], m[ok])) else NA_real_ }, numeric(1))
     data.frame(country = d$countries[ic], attack_max = max(attack), attack_med = median(attack),
-               peak_epi_frac = median(epi), cor_med = median(cors, na.rm = TRUE),
+               attack_min_season = min(attack), n_seasons = length(attack),
+               n_seasons_flat = sum(attack < attack_min), n_seasons_healthy = sum(attack > 4 * attack_min),
+               peak_epi_frac = median(epi), peak_epi_frac_min = min(epi),
+               cor_med = median(cors, na.rm = TRUE),
                phi = p$country[[ic]]$phi, phi_data = phid[ic],
                phi_ratio = p$country[[ic]]$phi / phid[ic], stringsAsFactors = FALSE)
   })
   out = do.call(rbind, rows)
-  out$flat = out$attack_max < attack_min | out$peak_epi_frac < epi_frac_min
+  out$flat_whole = out$attack_max < attack_min | out$peak_epi_frac < epi_frac_min
+  out$flat_partial = !out$flat_whole & out$n_seasons_flat > 0 & out$n_seasons_healthy >= 2
+  out$flat = out$flat_whole | out$flat_partial
   out
 }
 
@@ -247,7 +291,7 @@ jm_unflatten = function(th, d, maxit = 400L, cores = max(1L, parallel::detectCor
     starts = list(th0_data[idx], th0_data[idx], th0_data[idx], th[idx])
     starts[[2]][i_seed] = starts[[2]][i_seed] + log(10)
     starts[[3]][i_seed] = starts[[3]][i_seed] - log(10)
-    best = list(par = th[idx], value = v0)
+    best = list(par = th[idx], value = v0, conv = NA_integer_)
     for (st in starts){
       st[i_phi] = log(phid[ic])
       # (a) hold the dispersion, optimise everything else in the block
@@ -259,20 +303,31 @@ jm_unflatten = function(th, d, maxit = 400L, cores = max(1L, parallel::detectCor
       # (b) release it and optimise the whole block
       o2 = tryCatch(optim(st2, f, method = "BFGS", control = list(maxit = maxit, reltol = 1e-10)),
                     error = function(e) NULL)
-      if (!is.null(o2) && is.finite(o2$value) && o2$value < best$value) best = list(par = o2$par, value = o2$value)
+      if (!is.null(o2) && is.finite(o2$value) && o2$value < best$value)
+        best = list(par = o2$par, value = o2$value, conv = o2$convergence)
     }
-    list(ic = ic, par = best$par, value = best$value, before = v0)
+    list(ic = ic, par = best$par, value = best$value, before = v0, conv = best$conv)
   }, mc.cores = min(cores, length(bad)))
-  for (r in res) if (!is.null(r) && r$value < r$before) th[bl$local[[r$ic]]] = r$par
+  # mclapply returns NULL for a KILLED worker and a "try-error" object for one that raised; the
+  # latter would abort the whole fit at r$value with "$ operator is invalid for atomic vectors".
+  dead = vapply(res, function(r) is.null(r) || inherits(r, "try-error") || !is.list(r), logical(1))
+  if (any(dead)){
+    warning(sprintf("flat-line protector: the worker failed for %s, so those countries were NOT rescued",
+                    paste(chk$country[bad[dead]], collapse = ", ")), call. = FALSE)
+    res = res[!dead]
+  }
+  for (r in res) if (r$value < r$before) th[bl$local[[r$ic]]] = r$par
   chk2 = jm_flat_check(th, d, attack_min, epi_frac_min)
-  for (r in Filter(Negate(is.null), res)){
+  for (r in res){
     ic = r$ic
     report = rbind(report, data.frame(country = chk$country[ic],
       action = if (!chk2$flat[ic]) "rescued" else if (r$value < r$before) "improved but still flat" else "unresolved",
       negll_before = r$before, negll_after = min(r$value, r$before),
-      attack_before = chk$attack_max[ic], attack_after = chk2$attack_max[ic], stringsAsFactors = FALSE))
+      attack_before = chk$attack_max[ic], attack_after = chk2$attack_max[ic],
+      conv = if (is.null(r$conv)) NA_integer_ else as.integer(r$conv), stringsAsFactors = FALSE))
   }
-  n_fixed = sum(report$action == "rescued"); n_un = sum(report$action != "rescued")
+  n_fixed = sum(report$action == "rescued")
+  n_un = sum(chk2$flat)     # from the RE-CHECK: a missing report row must not be able to hide one
   if (verbose){
     print(report, row.names = FALSE, digits = 4)
     cat(sprintf("flat-line protector: %d rescued, %d unresolved\n", n_fixed, n_un))
@@ -285,8 +340,9 @@ jm_unflatten = function(th, d, maxit = 400L, cores = max(1L, parallel::detectCor
 # ---- |-fit by block coordinate descent, then one joint polish ----
 jm_fit = function(d, theta0 = jm_theta0(d), max_sweeps = 15L, tol = 0.05, maxit_local = 400L,
                   maxit_shared = 400L, polish_maxit = 300L, cores = max(1L, parallel::detectCores() - 1L),
-                  verbose = TRUE){
+                  attack_min = 0.03, epi_frac_min = 0.15, verbose = TRUE){
   bl = jm_blocks(d); th = theta0
+  os = NULL; sw = 0L              # so the returned convergence fields exist even at max_sweeps = 0
   phid = jm_phi_data(d)          # each country's own data-implied dispersion, for the extra starts
   t_start = Sys.time()
   obj = jm_negll_cpp(th, d)
@@ -312,17 +368,23 @@ jm_fit = function(d, theta0 = jm_theta0(d), max_sweeps = 15L, tol = 0.05, maxit_
       starts = list(th[idx])                           # (1) warm: where the last sweep left it
       s2 = th[idx]; s2[i_phi] = log(phid[ic]); starts[[2]] = s2           # (2) dispersion at THIS country's scatter
       s3 = s2; s3[i_seed] = s3[i_seed] + log(10); starts[[3]] = s3       # (3) ... and an earlier arrival
-      best = NULL
+      # seed with the value we ALREADY have, so a block can never be written back worse than it came
+      # in: if the warm start errored and a cold start succeeded at a worse value, the old code
+      # adopted the worse one and the objective stopped being monotone
+      best = list(par = th[idx], value = f(th[idx]), conv = 0L)
       for (st in starts){
         o = tryCatch(optim(st, f, method = "BFGS", control = list(maxit = maxit_local, reltol = 1e-10)),
                      error = function(e) NULL)
-        if (!is.null(o) && is.finite(o$value) && (is.null(best) || o$value < best$value))
+        if (!is.null(o) && is.finite(o$value) && o$value < best$value)
           best = list(par = o$par, value = o$value, conv = o$convergence)
       }
       best
     }, mc.cores = min(cores, d$n_country))
-    for (ic in seq_len(d$n_country)) if (!is.null(fits[[ic]])) th[bl$local[[ic]]] = fits[[ic]]$par
-    conv_local = vapply(fits, function(f) if (is.null(f)) 99L else as.integer(f$conv), integer(1))
+    bad_w = vapply(fits, function(f) is.null(f) || inherits(f, "try-error") || !is.list(f), logical(1))
+    if (any(bad_w)) warning(sprintf("sweep %d: the worker failed for %s, so those blocks were left as they were",
+                                    sw, paste(d$countries[bad_w], collapse = ", ")), call. = FALSE)
+    for (ic in seq_len(d$n_country)) if (!bad_w[ic]) th[bl$local[[ic]]] = fits[[ic]]$par
+    conv_local = vapply(seq_len(d$n_country), function(ic) if (bad_w[ic]) 99L else as.integer(fits[[ic]]$conv), integer(1))
     obj_l = jm_negll_cpp(th, d)
     trace = rbind(trace, data.frame(sweep = sw, step = "local", negll = obj_l,
                                     seconds = as.numeric(difftime(Sys.time(), t_start, units = "secs"))))
@@ -341,9 +403,11 @@ jm_fit = function(d, theta0 = jm_theta0(d), max_sweeps = 15L, tol = 0.05, maxit_
   }
   # --- the flat-line protector, before the polish: a flat country would otherwise be polished into
   # a locally optimal flat solution and look converged
-  prot1 = jm_unflatten(th, d, cores = cores, verbose = verbose)
-  th = prot1$theta; obj = jm_negll_cpp(th, d)
-  if (prot1$n_fixed > 0 && verbose) cat(sprintf("  after rescue: negll %.2f\n", obj))
+  prot1 = jm_unflatten(th, d, cores = cores, attack_min = attack_min, epi_frac_min = epi_frac_min,
+                       verbose = verbose)
+  th = prot1$theta; obj_p = jm_negll_cpp(th, d)
+  if (obj_p < obj && verbose) cat(sprintf("  after rescue: negll %.2f (gained %.2f)\n", obj_p, obj - obj_p))
+  obj = obj_p
   # --- one joint polish: all parameters together, to clear any residual cross-block curvature
   op = tryCatch(optim(th, function(x) jm_negll_cpp(x, d), method = "BFGS",
                       control = list(maxit = polish_maxit, reltol = 1e-11)), error = function(e) NULL)
@@ -351,19 +415,30 @@ jm_fit = function(d, theta0 = jm_theta0(d), max_sweeps = 15L, tol = 0.05, maxit_
   if (!is.null(op) && is.finite(op$value) && op$value < obj){ polish_gain = obj - op$value; th = op$par; obj = op$value }
   names(th) = jm_par_names(d)
   # --- and once more after the polish, so the RETURNED fit is guaranteed checked
-  prot2 = jm_unflatten(th, d, cores = cores, verbose = verbose)
-  if (prot2$n_fixed > 0){ th = prot2$theta; obj = jm_negll_cpp(th, d); names(th) = jm_par_names(d) }
+  # ADOPT UNCONDITIONALLY. jm_unflatten's theta is provably never worse -- it adopts a country's block
+  # only when that block's objective improves -- so gating on n_fixed (which counts only rescues that
+  # CLEARED the threshold) would discard a strictly better vector whenever a country improved without
+  # clearing it. Measured: that path threw away a 5648-nat improvement, and because the reported check
+  # was computed on the returned theta while the discarded one was kept, fit$flat then described a
+  # different parameter vector from fit$theta.
+  prot2 = jm_unflatten(th, d, cores = cores, attack_min = attack_min, epi_frac_min = epi_frac_min,
+                       verbose = verbose)
+  th = prot2$theta; obj = jm_negll_cpp(th, d); names(th) = jm_par_names(d)
+  flat_final = jm_flat_check(th, d, attack_min, epi_frac_min)   # on the theta we actually return
   trace = rbind(trace, data.frame(sweep = 99L, step = "polish", negll = obj,
                                   seconds = as.numeric(difftime(Sys.time(), t_start, units = "secs"))))
   secs = as.numeric(difftime(Sys.time(), t_start, units = "secs"))
   if (verbose) cat(sprintf("done in %.1f s: negll %.2f (polish gained %.2f), loglik %.2f\n",
                            secs, obj, polish_gain, jm_loglik_cpp(th, d)))
   list(theta = th, negll = obj, loglik = jm_loglik_cpp(th, d), seconds = secs, trace = trace,
-       sweeps = if (exists("sw")) sw else NA_integer_, conv_local = conv_local,
+       sweeps = sw, conv_local = conv_local,
        conv_shared = if (is.null(os)) 99L else os$convergence,
        conv_polish = if (is.null(op)) 99L else op$convergence, polish_gain = polish_gain,
-       flat = prot2$check, flat_report = rbind(prot1$report, prot2$report),
-       n_flat_unresolved = prot2$n_unresolved, d = d)
+       flat = flat_final, n_flat_unresolved = sum(flat_final$flat),
+       flat_report = rbind(if (nrow(prot1$report)) cbind(prot1$report, pass = "pre-polish"),
+                           if (nrow(prot2$report)) cbind(prot2$report, pass = "post-polish")),
+       flat_thresholds = c(attack_min = attack_min, epi_frac_min = epi_frac_min),
+       converged = isTRUE(sw < max_sweeps), d = d)
 }
 
 # ---- |-tidy the parameters ----
@@ -438,7 +513,9 @@ jm_negll_R = function(th, d){
         for (k in 1:7){
           day = day + 1L
           lam = beta * as.numeric(Cs %*% (Iu + (1 - d$ve_spread) * Iv))
-          nu = lam * Su; nv = (1 - d$ve_inf) * lam * Sv
+          # cap the flow at what the pool holds, exactly as the .cpp does: without it the
+          # accumulator banks infections implying a negative S_u that the clamp then undoes
+          nu = pmin(lam * Su, Su); nv = pmin((1 - d$ve_inf) * lam * Sv, Sv)
           Su = Su - nu; Iu = Iu + nu - d$gamma * Iu
           Sv = Sv - nv; Iv = Iv + nv - d$gamma * Iv
           acc = acc + nu + (1 - d$ve_ili) * nv
