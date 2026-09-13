@@ -375,8 +375,11 @@ jm_unpack = function(th, d){
              sigma_eld = unname(2^th[2L * S]))
   cty = lapply(seq_len(d$n_country), function(ic){
     base = d$off_country[ic]; ics = d$cs_of_country[[ic]] + 1L
-    list(S0 = plogis(th[base + 1]), c = exp(th[base + 2]),
-         off_young = th[base + 3], off_eld = th[base + 4], phi = exp(th[base + 5]),
+    # unname the scalars: they would otherwise carry the parameter's own label ("DK:logit_S0") and
+    # leak it into every data frame, summary column and plot label built from them
+    list(S0 = unname(plogis(th[base + 1])), c = unname(exp(th[base + 2])),
+         off_young = unname(th[base + 3]), off_eld = unname(th[base + 4]),
+         phi = unname(exp(th[base + 5])),
          b = setNames(exp(th[base + 5 + seq_len(d$n_src[ic])]), d$sources[[ic]]),
          I0 = setNames(exp(th[base + 5 + d$n_src[ic] + seq_along(ics)]), d$seasons[d$cs_season[ics] + 1L]))
   })
