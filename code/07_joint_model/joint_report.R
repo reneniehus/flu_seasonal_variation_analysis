@@ -27,6 +27,13 @@ suppressMessages({library(ggplot2); library(dplyr); library(tidyr)})
 .jm_iv = function(iv, names_wanted){
   if (is.null(iv)) return(NULL)
   i = match(names_wanted, iv$parameter)
+  # A name that is not in the interval table yields an NA row, which ggplot drops SILENTLY -- the bar
+  # just is not there and nothing says so. Warn, so a renamed parameter cannot quietly remove the
+  # uncertainty from a figure. The returned frame keeps the requested ORDER, which is what callers
+  # rely on when they bind it to a plotting frame.
+  if (anyNA(i)) warning(sprintf("no interval for %d parameter(s), bars omitted: %s",
+                                sum(is.na(i)), paste(head(names_wanted[is.na(i)], 5), collapse = ", ")),
+                        call. = FALSE)
   data.frame(estimate = iv$estimate[i], lower = iv$lower[i], upper = iv$upper[i])
 }
 .jm_ivnote = function(iv) if (is.null(iv)) "" else
@@ -35,22 +42,30 @@ suppressMessages({library(ggplot2); library(dplyr); library(tidyr)})
 # ================= HOW THE MODEL WORKS =================
 
 # ---- |-01 what varies where ----
-plot_jm_design = function(fit){
-  d = fit$d; S = d$n_season; C = d$n_country
-  spec = tibble::tribble(
+# The spec is a SEPARATE function so a test can hold it against the real layout: the `n` column must
+# add up to d$n_par exactly. It drifted once already -- the season-visibility row claimed one number
+# per season when the sum-to-zero constraint leaves only S-1 of them free -- and a figure that
+# miscounts the model is worse than no figure, because it is the one a reader trusts for the design.
+jm_design_spec = function(d){
+  S = d$n_season; C = d$n_country
+  tibble::tribble(
     ~group,        ~parameter,                  ~season, ~country, ~age, ~n,                       ~note,
     "dynamics",    "R0  transmissibility",      TRUE,  FALSE, FALSE, S,           "one number per season for all of Europe",
     "dynamics",    "S0  susceptibility",        FALSE, TRUE,  FALSE, C,           "one per country, same across its seasons",
     "dynamics",    "sigma  elderly suscept.",   FALSE, FALSE, TRUE,  1,           "one number for everyone",
     "dynamics",    "I0  seed / arrival",        TRUE,  TRUE,  FALSE, d$n_cs,      "free for every wave: sets when it arrives",
     "observation", "c  reporting level",        FALSE, TRUE,  FALSE, C,           "one per surveillance system",
-    "observation", "delta  season visibility",  TRUE,  FALSE, FALSE, S,           "shared, constrained to average one",
+    "observation", "delta  season visibility",  TRUE,  FALSE, FALSE, S - 1L,      "one per season, the last set by the average-one constraint",
     "observation", "off  age reporting",        FALSE, TRUE,  TRUE,  2 * C,       "adults the reference",
     "observation", "b  off-season baseline",    FALSE, TRUE,  FALSE, sum(d$n_src),"one per data source present",
     "observation", "phi  dispersion",           FALSE, TRUE,  FALSE, C,           "one per country",
-    "fixed",       "gamma  infectious period",  FALSE, FALSE, FALSE, 0,           "3.6 days, from the literature",
-    "fixed",       "vaccine effects (3)",       FALSE, FALSE, TRUE,  0,           "fixed, 65+ pulse on 1 October",
-    "fixed",       "contact matrix",            FALSE, TRUE,  TRUE,  0,           "fixed, rescaled to spectral radius 1")
+    "fixed",       "gamma  infectious period",  FALSE, FALSE, FALSE, 0L,          "3.6 days, from the literature",
+    "fixed",       "vaccine effects (3)",       FALSE, FALSE, TRUE,  0L,          "fixed, 65+ pulse on 1 October",
+    "fixed",       "contact matrix",            FALSE, TRUE,  TRUE,  0L,          "fixed, rescaled to spectral radius 1")
+}
+
+plot_jm_design = function(fit){
+  d = fit$d; spec = jm_design_spec(d)
   long = spec %>%
     pivot_longer(c(season, country, age), names_to = "dim", values_to = "varies") %>%
     mutate(dim = factor(dim, levels = c("season", "country", "age"),
@@ -77,6 +92,8 @@ plot_jm_design = function(fit){
                           "contributes. The design is the science: sharing transmissibility across countries is what makes",
                           "susceptibility identifiable, and constraining season visibility to average one is what keeps it",
                           "separable from each country's reporting level.", sep = "\n"),
+         caption = sprintf("The counts add to %d fitted numbers, estimated from %d country-seasons of weekly age-specific data across %d countries and %d seasons.",
+                           sum(spec$n), d$n_cs, d$n_country, d$n_season),
          x = NULL, y = NULL) +
     .jm_theme() + theme(panel.grid = element_blank(), axis.text.y = element_text(size = 9.5))
 }
@@ -259,7 +276,12 @@ plot_jm_age_offsets = function(fit, iv = NULL){
   age = s %>% select(country, young = rel_young, elderly = rel_elderly) %>%
     pivot_longer(c(young, elderly), names_to = "group", values_to = "rel") %>%
     mutate(group = factor(group, levels = c("young", "elderly")))
-  ci = .jm_iv(iv, c(paste0(d$countries, ":off_young"), paste0(d$countries, ":off_eld")))
+  # Build the parameter name FROM EACH ROW. pivot_longer interleaves (country1 young, country1
+  # elderly, country2 young, ...) while a blocked request returns (all young, then all elderly), so
+  # binding the two attached every bar to the wrong country and group. Constructing the name per row
+  # cannot go out of order however the frame is reshaped; the test asserts each bar brackets its point.
+  age$par = paste0(age$country, ifelse(age$group == "young", ":off_young", ":off_eld"))
+  ci = .jm_iv(iv, age$par)
   if (!is.null(ci)){ age$lower = ci$lower; age$upper = ci$upper }
   g = ggplot(age, aes(rel, reorder(country, rel), colour = group)) +
     geom_vline(xintercept = 1, linetype = "dashed", colour = "grey50")
@@ -321,16 +343,24 @@ plot_jm_identifiability = function(id){
 
 # ---- |-13 recovery of a known truth ----
 plot_jm_recovery = function(rec, d, summ = NULL){
+  # run_joint_recovery.R saves THREE studies in one object (base / local / prior / driver). Being
+  # handed that wrapper instead of one study's `rec` is the easy mistake; say so instead of failing
+  # inside a dplyr verb with an unrecognisable message.
+  if (!is.data.frame(rec$comparison))
+    stop("plot_jm_recovery() needs one study, not the whole saved object: pass e.g. ",
+         "readRDS('output/joint_model/joint_recovery.rds')$local$rec")
   if (is.null(summ)) summ = jm_recovery_summary(rec, d)
   cmp = summ$comparison %>%
     filter(family %in% c("R0 (season, shared)", "season deviation (shared)", "S0 (country)",
                          "reporting c (country)", "elderly susceptibility (global)"))
   cov_txt = summ$by_family %>% filter(!is.na(coverage)) %>%
     summarise(m = median(coverage)) %>% pull(m)
-  # A replicate in which one country fell into the flat-line optimum throws an estimate far off scale
+  # A replicate in which one country landed in a bad local optimum throws an estimate far off scale
   # and would squash every other panel flat. Such points are WINSORISED FOR DISPLAY ONLY, drawn as
   # open triangles at the panel edge and counted in the subtitle, so they are visible rather than
-  # hidden and the informative range stays readable.
+  # hidden and the informative range stays readable. The cap is 35% of the family's own truth range
+  # beyond its extremes, falling back to 35% of the level itself where a family has a single truth
+  # value (the global elderly susceptibility), so that band is never zero-width.
   cmp = cmp %>% group_by(family) %>%
     mutate(rng = diff(range(truth)),
            cap_hi = max(truth) + 0.35 * ifelse(rng > 0, rng, abs(max(truth))),
@@ -351,8 +381,8 @@ plot_jm_recovery = function(rec, d, summ = NULL){
                           sprintf("%.2f", summ$rank_shared$spearman_med[summ$rank_shared$block == "R0 by season"][1]),
                           ", susceptibility ranking ", sprintf("%.2f", summ$rank_S0_spearman),
                           ",\n95% interval coverage ", sprintf("%.0f%%", 100 * cov_txt),
-                          ". Orange triangles are ", n_off, " estimate(s) off scale, where one country",
-                          "\nin one replicate fell into the flat-line optimum; they are drawn at the panel edge, not dropped.",
+                          ". Orange triangles are ", n_off, " estimate(s) that fell outside",
+                          "\ntheir panel's range; they are drawn at the edge rather than dropped, so a failure cannot hide.",
                           "\nAnything the fit cannot recover from its own simulation cannot be trusted from real data either."),
          x = "true value", y = "estimated value") + .jm_theme()
 }
@@ -383,8 +413,21 @@ save_jm_report = function(fit, id = NULL, iv = NULL, rec = NULL, dir = "output/j
   put("11_attack_rates.png", plot_jm_attack(fit), 10, 6.0, "what it learns: modelled attack rate by age group, the one reporting-free output")
   if (!is.null(id)) put("12_data_or_prior.png", plot_jm_identifiability(id), 10, 5.4,
                         "whether to believe it: how much each parameter owes to the data rather than its prior")
-  if (!is.null(rec)) put("13_recovery.png", plot_jm_recovery(rec, d), 10, 7.0,
-                         "whether to believe it: recovery of a known truth simulated from the model onto the real design")
+  # Figure 13 is normally written by run_joint_recovery.R, which is a separate (much longer) run. So
+  # when this function is called without `rec` an EXISTING 13 is left on disk untouched: list it
+  # anyway, with its date, rather than leaving a figure present but unmentioned and silently older
+  # than the rest of the set.
+  f13 = file.path(dir, "13_recovery.png")
+  if (!is.null(rec)){
+    put("13_recovery.png", plot_jm_recovery(rec, d), 10, 7.0,
+        "whether to believe it: recovery of a known truth simulated from the model onto the real design")
+  } else if (file.exists(f13)){
+    man = c(man, sprintf(paste0("| `13_recovery.png` | whether to believe it: recovery of a known truth. ",
+                                "NOT regenerated by this run -- written by `run_joint_recovery.R`, last on %s |"),
+                         format(file.mtime(f13), "%Y-%m-%d %H:%M")))
+  } else {
+    man = c(man, "| `13_recovery.png` | whether to believe it: recovery of a known truth. NOT YET RUN -- produce it with `Rscript code/07_joint_model/run_joint_recovery.R` |")
+  }
   write.csv(jm_summary_season(fit), file.path(dir, "summary_season.csv"), row.names = FALSE)
   write.csv(jm_summary_country(fit), file.path(dir, "summary_country.csv"), row.names = FALSE)
   write.csv(jm_adequacy(fit), file.path(dir, "noise_budget.csv"), row.names = FALSE)

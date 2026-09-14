@@ -17,7 +17,10 @@
 #      export checks theta's length before reading it;
 #   7. the flat-line protector detects whole and partial flat lines, rescues them, never makes an
 #      objective worse, leaves a healthy fit untouched, and reports a check that describes the theta
-#      jm_fit actually returns.
+#      jm_fit actually returns;
+#   8. the FIGURES describe the model they are drawn from: the design table's parameter counts add up
+#      to the real parameter count, and every error bar is bound to the parameter it is drawn
+#      against. Both had failed silently -- a mis-bound bar renders just as cleanly as a correct one.
 # Skipped offline when the cached model inputs are absent, so run_tests.R stays runnable.
 
 skip_if_not_installed("Rcpp")
@@ -286,4 +289,51 @@ test_that("jm_fit's reported flat check describes the theta it actually returns"
   expect_equal(small$n_flat_unresolved, sum(small$flat$flat))
   expect_true(is.logical(small$converged))
   expect_named(small$flat_thresholds, c("attack_min", "epi_frac_min"))
+})
+
+# ---- the figures must describe the model they are drawn from ----
+# A figure is a claim. These two were wrong on disk before the checks below existed: the design
+# table counted one season visibility too many (the sum-to-zero constraint leaves S-1 free), and
+# figure 10's error bars were bound to a blocked name list while the plotting frame was interleaved
+# by country, so 22 of 24 bars sat on the wrong parameter. Both are silent failures -- the figure
+# renders perfectly either way -- so they are held by a test rather than by inspection.
+test_that("the design figure's parameter counts add up to the model's actual parameter count", {
+  suppressMessages(source(here::here("code/07_joint_model/joint_report.R")))
+  spec <- jm_design_spec(d)
+  expect_equal(sum(spec$n), d$n_par)
+  # the fitted rows must be exactly the ones with a non-zero count, and the fixed ones zero
+  expect_true(all(spec$n[spec$group == "fixed"] == 0))
+  expect_true(all(spec$n[spec$group != "fixed"] > 0))
+  # and the counts must survive a differently-shaped panel
+  d3 <- withr::with_dir(here::here(),
+                        jm_build_data(c("DK", "EE", "FR"), models_in, demo, verbose = FALSE))
+  expect_equal(sum(jm_design_spec(d3)$n), d3$n_par)
+})
+
+test_that("every figure's error bar is bound to the parameter it is drawn against", {
+  suppressMessages({source(here::here("code/07_joint_model/joint_recovery.R"))
+                    source(here::here("code/07_joint_model/joint_report.R"))})
+  small <- jm_fit(d, max_sweeps = 2L, cores = 1, verbose = FALSE)
+  iv <- jm_intervals(small)
+  s  <- jm_summary_country(small); ss <- jm_summary_season(small)
+  # the interval table's own estimate must equal the quantity each figure plots, on that figure's
+  # scale -- this is what says the back-transform in the figure matches the one in jm_intervals
+  pick <- function(n) iv[match(n, iv$parameter), ]
+  expect_equal(pick(paste0("log_R0_", d$seasons))$estimate, ss$R0, tolerance = 1e-8)
+  expect_equal(exp(pick(paste0("delta_", d$seasons))$estimate), ss$reporting_mult, tolerance = 1e-8)
+  expect_equal(pick(paste0(d$countries, ":logit_S0"))$estimate, s$S0, tolerance = 1e-8)
+  expect_equal(pick(paste0(d$countries, ":log_c"))$estimate, s$c_adult, tolerance = 1e-8)
+  expect_equal(pick(paste0(d$countries, ":off_young"))$estimate, s$rel_young, tolerance = 1e-8)
+  expect_equal(pick(paste0(d$countries, ":off_eld"))$estimate, s$rel_elderly, tolerance = 1e-8)
+  # figure 10 reshapes country x {young, elderly} into long form; the bars must follow the reshape
+  age <- s[, c("country", "rel_young", "rel_elderly")]
+  names(age) <- c("country", "young", "elderly")
+  age <- tidyr::pivot_longer(age, c("young", "elderly"), names_to = "group", values_to = "rel")
+  age$par <- paste0(age$country, ifelse(age$group == "young", ":off_young", ":off_eld"))
+  ci <- .jm_iv(iv, age$par)
+  expect_equal(ci$estimate, age$rel, tolerance = 1e-8)
+  expect_true(all(age$rel >= pmin(ci$lower, ci$upper) - 1e-9 &
+                  age$rel <= pmax(ci$lower, ci$upper) + 1e-9))
+  # a missing name must warn rather than silently drop a bar
+  expect_warning(.jm_iv(iv, c(d$countries[1], ":off_young", "no_such_parameter")))
 })
