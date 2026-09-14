@@ -583,7 +583,10 @@ looked well determined only because it was borrowing the tight transmissibility 
 week-to-week scatter can explain (`jm_adequacy`, figure 05). That excess is the deterministic mean
 failing to follow the wave, written off as measurement error. It is the trigger condition for restoring
 the filter, and the filter should be judged on whether it CLOSES THAT GAP rather than on whether it
-moves the estimates.
+moves the estimates. Stress-tested 2026-09-14 across 18 ways of measuring the scatter (smoothing window
+3/5/7 weeks, epidemic threshold 5/20/50 per 100 000, with and without the small-sample correction): the
+excess runs 2.13x-3.65x, so the reported 2.59x is the conservative end of the range rather than the
+flattering one, and the gap is not an artefact of the measurement choice.
 
 **What it learns, with intervals.** Season visibility spans 0.57-1.80 with non-overlapping intervals
 between the extreme seasons, while transmissibility spans 1.51-1.71 with intervals of about +/-0.09 that
@@ -591,10 +594,52 @@ mostly overlap. So between-season differences in observed burden are mostly abou
 was, not how TRANSMISSIBLE it was. That is the pilot's Danish conclusion, now carried by 86 waves.
 Caveat to carry: season visibility is partly a residual absorber, so read it with the noise budget.
 
+**That conclusion survives removing the prior asymmetry (tested 2026-09-14).** The obvious objection is
+that the priors are asymmetric by construction -- `log R0 ~ N(log 1.5, 0.15)` against
+`delta ~ N(0, 0.5)` -- so the tight one could be manufacturing the narrow transmissibility spread. It
+is not. Refitting with the `R0_s` prior widened fourfold to 0.60 changes its fitted sd(log) from 0.036
+to 0.037; refitting with BOTH priors at 0.50 gives 0.037 against visibility's 0.377. Visibility varies
+about ten times as much under every setting. What the prior does control is the LEVEL: widening it moved
+the fitted `R0_s` range from 1.51-1.71 to 1.54-1.76. **Report the spread as a finding, the level as
+prior-informed.**
+
 **Recovery.** See MODEL.md for the numbers. Headline: the publishable quantities recover (rank 0.95-0.97,
 coverage 96% median), the intervals are conditional on the optimiser finding the right basin (coverage
 falls to 25-79% when truth is drawn from the priors), and the learning layer's two-step procedure is
 UNBIASED, so driver slopes can be read at face value.
+
+**But a recovery test that cannot fail certifies nothing (added 2026-09-14).** All of the above simulates
+from the model's OWN parameter space, so it asks whether the optimiser works, never whether the model's
+assumptions hold. Adding arms that simulate from truths the model cannot represent
+(`jm_simulate_violation`, `jm_misspecification_check`) changed the reading of the whole recovery result:
+
+| arm | R0 rank | visibility rank | **S0 rank** | noise excess |
+|---|---|---|---|---|
+| control (representable) | 1.00 | 0.96 | **0.97** | 1.25x |
+| per-country R0, sd(log) 0.10 | 0.95 | 0.96 | **0.09** | 1.26x |
+| a second wave the SIR cannot make | 0.93 | 0.96 | **0.99** | 1.24x |
+
+**The decision this forces.** Sharing `R0_s` across countries is what makes `S0_c` identifiable -- that
+was the design's central win over the pilot (a 50-fold sharpening). The violation arm shows the same
+mechanism is its central risk: a country's true transmissibility deviation has nowhere to go but into
+its `S0_c`, so if the sharing is false the susceptibility ranking degrades to noise. A 10% spread is
+plausible. So `S0_c` rankings are to be reported as CONDITIONAL ON SHARED TRANSMISSIBILITY, and the first
+job of the learning layer is the model comparison that tests it: fit a per-country `R0` multiplier as an
+alternative and compare by likelihood.
+
+**And a caution about designing such arms.** The first attempt at a violation multiplied each country's
+expected counts by a constant. That is precisely what the per-country reporting level `c` does, so the
+model absorbed it exactly and the arm scored BETTER than the control while appearing to test the sharing
+assumption. A violation is only a violation if no parameter can reparameterise it away;
+`jm_violation_is_real` checks that the perturbation varies WITHIN a country-season, and the test suite
+enforces it on every arm.
+
+**Second reading of the noise gap.** A spurious 60% late wave in every season moved the noise excess from
+1.25x to 1.24x, i.e. not at all. So the noise budget is a weak misfit detector, and the real-data 2.59x
+cannot be a missed secondary wave -- it must be pervasive week-to-week wander across the whole season.
+That is what process noise describes, which sharpens the filter's job: it should close a gap of that
+SHAPE, and the innovation diagnostics should be checked against week-to-week wander rather than against
+episodic misfit.
 
 **The recovery harness is built to carry the learning layer.** `jm_truth_with_driver` constructs a world
 where a covariate really moves the season parameters by a known amount, and `jm_driver_recovery` runs the

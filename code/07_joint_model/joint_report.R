@@ -234,21 +234,28 @@ plot_jm_season_visibility = function(fit, iv = NULL){
 plot_jm_country_S0 = function(fit, iv = NULL){
   d = fit$d; s = jm_summary_country(fit)
   ci = .jm_iv(iv, paste0(d$countries, ":logit_S0")); if (!is.null(ci)) s = cbind(s, ci[, c("lower", "upper")])
+  # the value label sits to the right of the whole INTERVAL, not of the point -- at the point it is
+  # overprinted by the upper cap as soon as intervals are drawn. Added BEFORE ggplot(), which captures
+  # its data by value: a column attached afterwards is not in the plot and the aesthetic fails.
+  s$lab_at = if (!is.null(ci)) s$upper else s$S0
   g = ggplot(s, aes(S0, reorder(country, S0))) +
     annotate("rect", xmin = plogis(d$pr_S0_mean - 1.96 * d$pr_S0_sd),
              xmax = plogis(d$pr_S0_mean + 1.96 * d$pr_S0_sd), ymin = -Inf, ymax = Inf,
              fill = .jm_blue, alpha = 0.08) +
     geom_vline(xintercept = plogis(d$pr_S0_mean), linetype = "dashed", colour = "grey50")
-  if (!is.null(ci)) g = g + geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.22, colour = .jm_blue)
+  if (!is.null(ci)) g = g + geom_errorbar(aes(xmin = lower, xmax = upper), orientation = "y", width = 0.22, colour = .jm_blue)
   g + geom_point(size = 3.2, colour = .jm_blue) +
-    geom_text(aes(label = sprintf("%.3f", S0)), hjust = -0.35, size = 3, colour = "grey20") +
-    scale_x_continuous(limits = c(0, 1.1), breaks = seq(0, 1, 0.25)) +
+    geom_text(aes(x = lab_at, label = sprintf("%.3f", S0)), hjust = -0.25, size = 3, colour = "grey20") +
+    scale_x_continuous(limits = c(0, 1.15), breaks = seq(0, 1, 0.25)) +
     labs(title = "What it learns, 3: how susceptible each country was at the season start",
          subtitle = paste0("S0 is the share of the population that could be infected on 1 August, held the same across that",
                           "\ncountry's seasons. It is the project's target quantity, and it is identifiable here only because",
                           "\ntransmissibility is shared across countries: fitted one country at a time, the two trade off almost",
-                          "\nperfectly and the answer comes from the prior. Shaded band is the prior's 95% range. Trust the",
-                          "\nRANKING more than the absolute level.", .jm_ivnote(iv)),
+                          "\nperfectly and the answer comes from the prior. That cuts both ways, and it is the caveat to carry:",
+                          "\nif countries genuinely differ in transmissibility, the difference has nowhere to go but into S0. On",
+                          "\nsimulated data where countries' R0 really did differ by 10%, this RANKING fell from 0.97 to 0.09.",
+                          "\nSo read it as conditional on shared transmissibility, and trust the ranking over the absolute level.",
+                          .jm_ivnote(iv)),
          x = "S0", y = NULL) + .jm_theme()
 }
 
@@ -257,11 +264,13 @@ plot_jm_country_reporting = function(fit, iv = NULL){
   d = fit$d; s = jm_summary_country(fit)
   ci = .jm_iv(iv, paste0(d$countries, ":log_c"))
   if (!is.null(ci)){ s$lower = 100 * ci$lower; s$upper = 100 * ci$upper }
+  s$lab_at = if (!is.null(ci)) s$upper else s$c_adult * 100      # right of the interval, not the point
   g = ggplot(s, aes(c_adult * 100, reorder(country, c_adult)))
-  if (!is.null(ci)) g = g + geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.22, colour = .jm_green)
+  if (!is.null(ci)) g = g + geom_errorbar(aes(xmin = lower, xmax = upper), orientation = "y", width = 0.22, colour = .jm_green)
   g + geom_point(size = 3.2, colour = .jm_green) +
-    geom_text(aes(label = sprintf("%.1f%%", c_adult * 100)), hjust = -0.35, size = 3, colour = "grey20") +
-    scale_x_log10(expand = expansion(mult = c(0.08, 0.22))) +
+    geom_text(aes(x = lab_at, label = sprintf("%.1f%%", c_adult * 100)), hjust = -0.25, size = 3,
+              colour = "grey20") +
+    scale_x_log10(expand = expansion(mult = c(0.08, 0.30))) +
     labs(title = "What it learns, 4: what fraction of adult infections is actually counted",
          subtitle = paste0("The chance that one adult infection becomes an influenza-positive ILI consultation in that country's",
                           "\nsurveillance. A country low on this axis is not having fewer infections, it is seeing fewer of them.",
@@ -285,7 +294,7 @@ plot_jm_age_offsets = function(fit, iv = NULL){
   if (!is.null(ci)){ age$lower = ci$lower; age$upper = ci$upper }
   g = ggplot(age, aes(rel, reorder(country, rel), colour = group)) +
     geom_vline(xintercept = 1, linetype = "dashed", colour = "grey50")
-  if (!is.null(ci)) g = g + geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0, linewidth = 0.5,
+  if (!is.null(ci)) g = g + geom_errorbar(aes(xmin = lower, xmax = upper), orientation = "y", width = 0, linewidth = 0.5,
                                            position = position_dodge(width = 0.5))
   g + geom_point(size = 3, position = position_dodge(width = 0.5)) + scale_x_log10() +
     scale_colour_manual(values = .jm_gcol[c("young", "elderly")], name = NULL) +

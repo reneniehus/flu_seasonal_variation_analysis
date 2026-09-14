@@ -121,9 +121,10 @@ code/07_joint_model/           THE WORKING MODEL (branch flu_comp_model): all co
                                cut and why, the recovery results), joint_model.cpp (the entire
                                log-posterior in C++), joint_model.R (data, packing, block-coordinate
                                fitting, the flat-line protector, identifiability and adequacy
-                               diagnostics), joint_recovery.R (intervals; simulate-and-recover, with
-                               the driver hook for the learning layer), joint_report.R (the default
-                               numbered figure set), run_joint_model.R, run_joint_recovery.R
+                               diagnostics), joint_recovery.R (intervals; simulate-and-recover, the
+                               misspecification arms that make the test able to FAIL, and the driver
+                               hook for the learning layer), joint_report.R (the default numbered
+                               figure set), run_joint_model.R, run_joint_recovery.R
 code/06_comp_model/            the compartmental PILOT that preceded it, kept for its assumption
                                record and its data layer (build_comp_data is still used):
                                ASSUMPTIONS.md (every assumption, with provenance and evidence),

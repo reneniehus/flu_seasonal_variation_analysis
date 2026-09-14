@@ -27,8 +27,31 @@
 #
 # Everything returns tidy truth-versus-estimate tables, so bias, root-mean-square error, rank
 # recovery and interval coverage are all computed the same way whatever the truth constructor was.
+#
+# AND THE TEST MUST BE ABLE TO FAIL. Every truth constructor above lives inside the model's own
+# parameter space, so on its own the harness can only ask "is the optimum findable" -- it would
+# certify the model no matter how wrong the model's assumptions are about the world. So there is a
+# fourth entry point, jm_simulate_violation(), which simulates from truths the model CANNOT represent,
+# and jm_misspecification_check(), which scores the control and the violations side by side. It earns
+# its place: `r0_by_country` takes the susceptibility ranking from Spearman 0.97 to 0.09.
 
 suppressMessages({library(dplyr); library(tidyr)})
+
+# ---- |-the transform each slot lives behind ----
+# ONE definition, used by the intervals, the profiles and the recovery comparison. It depends only on
+# the parameter's NAME, never on the Hessian, which is what lets a recovery replicate skip the
+# expensive curvature computation when it does not need intervals. Every transform is monotone, so
+# pushing interval endpoints through it is exact for quantiles.
+jm_par_kind = function(nm)
+  ifelse(grepl("^log_R0", nm), "exp",
+  ifelse(grepl("^delta_", nm), "identity",
+  ifelse(grepl("^log2_sigma", nm), "pow2",
+  ifelse(grepl(":logit_S0", nm), "plogis",
+  ifelse(grepl(":off_", nm), "pow2", "exp")))))
+jm_par_tr = function(x, kind)
+  ifelse(kind == "exp", exp(x),
+  ifelse(kind == "plogis", plogis(x),
+  ifelse(kind == "pow2", 2^x, x)))
 
 # ---- |-uncertainty: curvature intervals for every parameter ----
 # The penalised Hessian at the optimum gives a Gaussian approximation to the posterior on the
@@ -42,16 +65,10 @@ jm_intervals = function(fit, H_post = NULL, level = 0.95){
   se = if (is.null(V)) rep(NA_real_, length(th)) else sqrt(pmax(diag(V), 0))
   z = qnorm(1 - (1 - level) / 2)
   lo_u = th - z * se; hi_u = th + z * se
-  # the transform each slot lives behind, and a human-readable name
-  kind = ifelse(grepl("^log_R0", nm), "exp",
-         ifelse(grepl("^delta_", nm), "identity",
-         ifelse(grepl("^log2_sigma", nm), "pow2",
-         ifelse(grepl(":logit_S0", nm), "plogis",
-         ifelse(grepl(":off_", nm), "pow2", "exp")))))
-  tr = function(x, k) ifelse(k == "exp", exp(x), ifelse(k == "plogis", plogis(x),
-                      ifelse(k == "pow2", 2^x, x)))
+  kind = jm_par_kind(nm)
   out = data.frame(parameter = nm, kind = kind, theta = unname(th), se = unname(se),
-             estimate = tr(unname(th), kind), lower = tr(unname(lo_u), kind), upper = tr(unname(hi_u), kind),
+             estimate = jm_par_tr(unname(th), kind), lower = jm_par_tr(unname(lo_u), kind),
+             upper = jm_par_tr(unname(hi_u), kind),
              row.names = NULL, stringsAsFactors = FALSE)
   # The LAST season deviation is not a free parameter: it is minus the sum of the others, so the
   # sum-to-zero constraint holds. Its interval needs the delta method, i.e. the variance of that sum,
@@ -125,9 +142,8 @@ jm_profile = function(fit, idx = NULL, n_grid = 7L, span = 3, sweeps = 2L,
                row.names = NULL, stringsAsFactors = FALSE)
   }))
   lim$kind = iv$kind[lim$j]
-  tr = function(x, k) ifelse(k == "exp", exp(x), ifelse(k == "plogis", plogis(x), ifelse(k == "pow2", 2^x, x)))
-  lim$estimate = tr(th0[lim$j], lim$kind)
-  lim$lower = tr(lim$lo_theta, lim$kind); lim$upper = tr(lim$hi_theta, lim$kind)
+  lim$estimate = jm_par_tr(th0[lim$j], lim$kind)
+  lim$lower = jm_par_tr(lim$lo_theta, lim$kind); lim$upper = jm_par_tr(lim$hi_theta, lim$kind)
   list(profile = prof, limits = lim, cut = cut)
 }
 
@@ -202,27 +218,105 @@ jm_simulate = function(theta, d, seed = NULL){
   ds
 }
 
+# ---- |-simulate from a truth the model CANNOT represent ----
+# A recovery test that cannot fail is worse than none, because it certifies whatever it is pointed at.
+# The truth constructors above all live inside the model's own parameter space, so they can only ever
+# ask "is the optimum findable". These VIOLATIONS leave that space deliberately, and the harness has
+# to report worse recovery on them. Measured 2026-09-14: `r0_by_country` takes the susceptibility
+# ranking from Spearman 0.97 to 0.09, so the test is not vacuous.
+#
+# The trap to avoid: a "violation" the model absorbs. The first attempt multiplied each country's
+# expected counts by a constant, which is EXACTLY what the per-country reporting level c does, so the
+# model reproduced it perfectly and the arm tested nothing. A violation must break something no
+# parameter can mop up -- `jm_violation_is_real` checks that, and the test suite enforces it.
+#
+#   r0_by_country  each country gets its own transmissibility multiplier. This is the assumption the
+#                  whole design rests on (sharing R0_s across countries is what makes S0_c
+#                  identifiable), and R0 changes the wave's SHAPE, so no reporting parameter can
+#                  absorb it. sd_log_r0 = 0.10 means countries spanning roughly 0.84-1.20.
+#   second_wave    a Gaussian bump late in the season. A single-wave SIR cannot make two humps at any
+#                  parameter value. Applied identically to every season, so it degrades FIT without
+#                  biasing the between-season contrasts -- which is itself worth knowing.
+jm_simulate_violation = function(theta, d, violation = c("none", "r0_by_country", "second_wave"),
+                                 seed = NULL, sd_log_r0 = 0.10, bump_height = 0.6,
+                                 bump_at = 0.78, bump_width = 3){
+  violation = match.arg(violation)
+  if (!is.null(seed)) set.seed(seed)
+  p = jm_unpack(theta, d); ds = d
+  rmul = if (violation == "r0_by_country") exp(rnorm(d$n_country, 0, sd_log_r0)) else rep(1, d$n_country)
+  # a per-country R0 has to enter the DYNAMICS, so the model is re-run per country with that country's
+  # shared R0 block shifted -- not patched onto mu afterwards, which would be a reporting effect
+  mu_all = vector("list", d$n_cs)
+  if (violation == "r0_by_country"){
+    for (ic in seq_len(d$n_country)){
+      th2 = theta; th2[seq_len(d$n_season)] = theta[seq_len(d$n_season)] + log(rmul[ic])
+      f2 = jm_fitted_cpp(th2, d)
+      for (i in (d$cs_of_country[[ic]] + 1L)) mu_all[[i]] = f2$mu[[i]]
+    }
+  } else mu_all = jm_fitted_cpp(theta, d)$mu
+  mu_base = jm_fitted_cpp(theta, d)$mu
+  for (i in seq_len(d$n_cs)){
+    ic = d$cs_country[i] + 1L; phi = p$country[[ic]]$phi; mu = mu_all[[i]]
+    if (violation == "second_wave"){
+      nw = nrow(mu)
+      b = bump_height * exp(-((seq_len(nw) - round(bump_at * nw))^2) / (2 * bump_width^2))
+      mu = mu * (1 + matrix(b, nw, ncol(mu)))
+    }
+    mu_all[[i]] = mu
+    ok = is.finite(d$y[[i]]); ysim = matrix(NA_real_, nrow(mu), ncol(mu))
+    ysim[ok] = rnbinom(sum(ok), size = phi, mu = mu[ok])
+    dimnames(ysim) = dimnames(d$y[[i]])
+    ds$y[[i]] = ysim; ds$lgamma_y1[i] = sum(lgamma(ysim[is.finite(ysim)] + 1))
+    ds$rates[[i]] = sweep(ysim, 2, d$rate_per / d$N[[ic]], "*")
+  }
+  attr(ds, "violation") = violation; attr(ds, "r0_mult") = rmul
+  attr(ds, "mu_ratio") = lapply(seq_len(d$n_cs), function(i) mu_all[[i]] / mu_base[[i]])
+  ds
+}
+
+# Is the violation REAL, or is it something the model can reparameterise away? A violation that only
+# rescales a country's expected counts by a constant is absorbed exactly by that country's reporting
+# level, so the ratio to the unperturbed mean has to VARY WITHIN a country-season to count.
+jm_violation_is_real = function(ds){
+  r = attr(ds, "mu_ratio")
+  if (is.null(r)) stop("not a violated data set: build it with jm_simulate_violation()")
+  if (identical(attr(ds, "violation"), "none")) return(FALSE)
+  # the spread of the ratio within each country-season: zero means a pure per-country rescaling
+  within = vapply(r, function(m){ v = m[is.finite(m)]; if (!length(v)) 0 else diff(range(v)) }, numeric(1))
+  max(within) > 1e-8
+}
+
 # ---- |-one replicate: simulate, refit from scratch, compare with the truth ----
-jm_recover_once = function(d, theta_true, seed, fit_args = list(), with_intervals = TRUE, verbose = FALSE){
-  ds = jm_simulate(theta_true, d, seed)
+# simulate_fn is the hook that lets a MISSPECIFIED replicate reuse this whole path: pass
+# function(theta, d, seed) jm_simulate_violation(theta, d, "r0_by_country", seed) and everything
+# downstream -- the comparison table, the family summaries, the rank recovery -- is computed the same
+# way, so a violated arm is directly comparable with the control rather than scored by separate code.
+jm_recover_once = function(d, theta_true, seed, fit_args = list(), with_intervals = TRUE,
+                           simulate_fn = jm_simulate, verbose = FALSE){
+  ds = simulate_fn(theta_true, d, seed)
   fit = do.call(jm_fit, c(list(d = ds, theta0 = jm_theta0(ds), verbose = verbose), fit_args))
-  iv = jm_intervals(fit)
   nm = jm_par_names(d)
-  # jm_intervals returns one row per FREE parameter plus one derived row for the constrained season
-  # deviation, so it must be matched BY NAME rather than by position -- assuming equal lengths is how
-  # this silently broke once already.
-  ivm = iv[match(nm, iv$parameter), ]
-  stopifnot(!anyNA(ivm$kind))
-  kind = ivm$kind
-  tr = function(x, k) ifelse(k == "exp", exp(x), ifelse(k == "plogis", plogis(x), ifelse(k == "pow2", 2^x, x)))
+  kind = jm_par_kind(nm)
   out = data.frame(parameter = nm, seed = seed,
                    truth_theta = unname(theta_true), est_theta = unname(fit$theta),
-                   truth = tr(unname(theta_true), kind), estimate = tr(unname(fit$theta), kind),
+                   truth = jm_par_tr(unname(theta_true), kind),
+                   estimate = jm_par_tr(unname(fit$theta), kind),
                    row.names = NULL, stringsAsFactors = FALSE)
-  if (with_intervals){ out$lower = ivm$lower; out$upper = ivm$upper
-    out$covered = out$truth >= pmin(ivm$lower, ivm$upper) & out$truth <= pmax(ivm$lower, ivm$upper) }
+  # The Hessian is the expensive part of a replicate (minutes, against ~100 s for the fit itself), and
+  # the transform above needs only the NAMES, so it is computed ONLY when intervals are asked for.
+  if (with_intervals){
+    iv = jm_intervals(fit)
+    # jm_intervals returns one row per FREE parameter plus one derived row for the constrained season
+    # deviation, so it must be matched BY NAME rather than by position -- assuming equal lengths is how
+    # this silently broke once already.
+    ivm = iv[match(nm, iv$parameter), ]
+    stopifnot(!anyNA(ivm$kind), identical(ivm$kind, kind))
+    out$lower = ivm$lower; out$upper = ivm$upper
+    out$covered = out$truth >= pmin(ivm$lower, ivm$upper) & out$truth <= pmax(ivm$lower, ivm$upper)
+  }
   list(comparison = out, negll = fit$negll, loglik = fit$loglik, seconds = fit$seconds,
-       conv = c(fit$conv_local, fit$conv_shared, fit$conv_polish), theta = fit$theta)
+       conv = c(fit$conv_local, fit$conv_shared, fit$conv_polish), theta = fit$theta,
+       violation = attr(ds, "violation"), adequacy_excess = median(jm_adequacy(fit)$excess, na.rm = TRUE))
 }
 
 # ---- |-many replicates ----
@@ -277,6 +371,61 @@ jm_recovery_summary = function(rec, d){
     summarise(spearman = suppressWarnings(cor(truth, estimate, method = "spearman")), .groups = "drop")
   list(by_family = as.data.frame(by_fam), rank_shared = as.data.frame(rank_rec),
        rank_S0_spearman = median(rank_cty$spearman, na.rm = TRUE), comparison = cmp)
+}
+
+# ---- |-CAN THE RECOVERY TEST FAIL? the misspecification arms ----
+# Run the control and each violation on the same truth and the same seed, and report the recovery
+# scores side by side. The control says what good looks like on this design; a violation that scores
+# the same as the control means the harness is blind to it, which is a finding about the DIAGNOSTIC,
+# not a reassurance about the model.
+#
+# Measured on the real 12-country design, 2026-09-14 (one replicate per arm, seed 601):
+#   arm                 R0 rank   visibility rank   S0 rank   noise excess
+#   control (truth representable)  1.00      0.96        0.97        1.25x
+#   r0_by_country (sd log 0.10)    0.95      0.96        0.09        1.26x
+#   second_wave (+60% late bump)   0.93      0.96        0.99        1.24x
+# Read: the season-level conclusions survive both violations; the susceptibility RANKING collapses
+# when R0 sharing is false, because sharing R0 is exactly what identifies S0, so a country's true R0
+# deviation has nowhere to go but into its S0. And the noise budget cannot see either violation, so it
+# is not the diagnostic for this failure -- a per-country R0 multiplier fitted as an ALTERNATIVE MODEL
+# and compared by likelihood is (the learning layer's first job).
+jm_misspecification_check = function(d, theta_true, violations = c("r0_by_country", "second_wave"),
+                                     seed = 601L, fit_args = list(), sd_log_r0 = 0.10,
+                                     verbose = TRUE){
+  arms = c("none", violations)
+  rows = lapply(arms, function(v){
+    sim = function(theta, dd, s) jm_simulate_violation(theta, dd, v, seed = s, sd_log_r0 = sd_log_r0)
+    if (verbose) cat(sprintf("  arm %-14s ", v))
+    t0 = Sys.time()
+    r = jm_recover_once(d, theta_true, seed, fit_args = fit_args, with_intervals = FALSE,
+                        simulate_fn = sim)
+    cmp = r$comparison
+    rk = function(pat, method = "spearman"){
+      s = cmp[grepl(pat, cmp$parameter), ]
+      if (nrow(s) < 3) return(NA_real_)
+      suppressWarnings(cor(s$truth, s$estimate, method = method))
+    }
+    out = data.frame(arm = v, absorbable = if (v == "none") NA
+                       else !jm_violation_is_real(sim(theta_true, d, seed)),
+                     rank_R0 = rk("^log_R0"), rank_visibility = rk("^delta_"),
+                     rank_S0 = rk(":logit_S0"), rank_c = rk(":log_c"),
+                     noise_excess = r$adequacy_excess, negll = r$negll,
+                     seconds = as.numeric(difftime(Sys.time(), t0, units = "secs")),
+                     row.names = NULL)
+    if (verbose) cat(sprintf("R0 %.2f  visibility %.2f  S0 %.2f  noise %.2fx  [%.0f s]\n",
+                             out$rank_R0, out$rank_visibility, out$rank_S0, out$noise_excess,
+                             out$seconds))
+    out
+  })
+  out = do.call(rbind, rows)
+  ctl = out[out$arm == "none", ]
+  # a violation is DETECTED if it degrades any reported ranking materially; the noise excess is
+  # reported alongside so its blindness is on the record rather than assumed
+  out$detected_by_ranking = out$arm != "none" &
+    (out$rank_R0 < ctl$rank_R0 - 0.15 | out$rank_visibility < ctl$rank_visibility - 0.15 |
+     out$rank_S0 < ctl$rank_S0 - 0.15)
+  out$detected_by_noise = out$arm != "none" & out$noise_excess > ctl$noise_excess * 1.25
+  out
 }
 
 # ---- |-the learning-layer recovery: is a known driver effect recovered end to end? ----

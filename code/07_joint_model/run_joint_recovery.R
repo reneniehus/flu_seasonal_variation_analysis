@@ -11,9 +11,16 @@
 #                          checks the driver effect comes back. This is the learning layer's own
 #                          validity test and the reason the harness is built to be pluggable.
 #
-#   Rscript code/07_joint_model/run_joint_recovery.R [n_local] [n_prior] [n_driver]
-# Defaults 8 / 4 / 6. Each replicate is a full refit, so budget roughly two minutes per replicate
-# plus four and a half for the Hessian wherever intervals are requested.
+#   4. MISSPECIFICATION    truth the model CANNOT represent. Asks whether the three studies above
+#                          could have failed at all. Without it they are self-certifying: they all
+#                          simulate from the model's own parameter space, so they test the optimiser
+#                          rather than the assumptions. This is the arm that found the sharp
+#                          limitation (see MODEL.md).
+#
+#   Rscript code/07_joint_model/run_joint_recovery.R [n_local] [n_prior] [n_driver] [n_misspec]
+# Defaults 8 / 4 / 6 / 1. Each replicate is a full refit, so budget roughly two minutes per replicate
+# plus four and a half for the Hessian wherever intervals are requested. The misspecification arms
+# skip the Hessian, so they cost about 100 s each.
 setwd(here::here())
 suppressMessages(source("code/01_main_supporting/setup.R"))
 source("code/01_main_supporting/stitch_iliplus.R"); source("code/01_main_supporting/sir_core.R")
@@ -27,6 +34,7 @@ args = commandArgs(TRUE)
 n_local  = if (length(args) >= 1) as.integer(args[1]) else 8L
 n_prior  = if (length(args) >= 2) as.integer(args[2]) else 4L
 n_driver = if (length(args) >= 3) as.integer(args[3]) else 6L
+n_misspec = if (length(args) >= 4) as.integer(args[4]) else 1L
 cores = max(1L, parallel::detectCores() - 1L)
 
 stopifnot(file.exists("output/joint_model/joint_fit.rds"))
@@ -82,6 +90,22 @@ if (n_driver > 0){
   cat("\n-- by parameter family --\n"); print(s3$by_family, row.names = FALSE, digits = 3)
   out$driver = list(rec = rec3, summary = s3, driver = dr, x = x,
                     beta_R0 = beta_R0, beta_delta = beta_delta)
+}
+
+# ---- 4. can the recovery test FAIL? the misspecification arms ----
+# Without this the three studies above are self-certifying: they all simulate from truths the model
+# can represent, so they ask whether the optimiser works, never whether the model's assumptions hold.
+if (n_misspec > 0){
+  cat("\n=== 4. misspecification: simulate from truths the model CANNOT represent ===\n")
+  cat("the control says what good looks like; an arm that matches the control is one the harness\n")
+  cat("cannot see, which is a finding about the diagnostic rather than a clean bill for the model\n")
+  ms = jm_misspecification_check(d, fit0$theta, seed = 601L, fit_args = list(cores = cores))
+  cat("\n"); print(ms, row.names = FALSE, digits = 3)
+  bad = ms[ms$arm != "none" & !ms$detected_by_ranking & !ms$detected_by_noise, ]
+  if (nrow(bad))
+    cat(sprintf("\nNOTE: %s left every reported quantity intact -- the model is ROBUST to it, and\n      no diagnostic here would flag it either.\n",
+                paste(bad$arm, collapse = ", ")))
+  out$misspec = ms
 }
 
 saveRDS(out, "output/joint_model/joint_recovery.rds")

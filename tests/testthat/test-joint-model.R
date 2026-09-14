@@ -337,3 +337,112 @@ test_that("every figure's error bar is bound to the parameter it is drawn agains
   # a missing name must warn rather than silently drop a bar
   expect_warning(.jm_iv(iv, c(d$countries[1], ":off_young", "no_such_parameter")))
 })
+
+test_that("the two other ordering-sensitive figures label their values correctly", {
+  suppressMessages(source(here::here("code/07_joint_model/joint_report.R")))
+  small <- jm_fit(d, max_sweeps = 2L, cores = 1, verbose = FALSE)
+  nm <- jm_par_names(d); p <- jm_unpack(small$theta, d)
+  # figure 02 reads each country's seeds as a vector; the SEASON LABEL it draws them against comes
+  # from cs_of_country, so the two orders have to agree. The names in theta are the ground truth.
+  for (ic in seq_len(d$n_country)){
+    ics <- d$cs_of_country[[ic]] + 1L
+    want <- paste0(d$countries[ic], ":log_I0_", d$seasons[d$cs_season[ics] + 1L])
+    expect_false(anyNA(match(want, nm)))
+    expect_equal(log(unname(p$country[[ic]]$I0)), unname(small$theta[match(want, nm)]),
+                 tolerance = 1e-9)
+  }
+  # figure 04 flattens week x age matrices into a long frame; every series must still be the column
+  # it came from, for both the observed and the modelled layer
+  tf <- jm_tidy_fit(small); f <- jm_fitted_cpp(small$theta, d)
+  expect_equal(nrow(tf), 2L * sum(d$n_weeks) * length(d$groups))
+  for (i in seq_len(d$n_cs)){
+    ic <- d$cs_country[i] + 1L; per <- d$rate_per / d$N[[ic]]
+    sel <- tf$country == d$countries[ic] & tf$season == d$seasons[d$cs_season[i] + 1L]
+    for (g in seq_along(d$groups)){
+      s <- tf[sel & tf$group == d$groups[g], ]
+      expect_equal(s$value[s$what == "observed"][order(s$week[s$what == "observed"])],
+                   unname(d$y[[i]][, g] * per[g]), tolerance = 1e-9)
+      expect_equal(s$value[s$what == "model"][order(s$week[s$what == "model"])],
+                   unname(f$mu[[i]][, g] * per[g]), tolerance = 1e-9)
+    }
+  }
+})
+
+test_that("the misspecification arms are real violations, not reparameterisations", {
+  # THE TRAP, hit for real: the first misspecification arm multiplied each country's expected counts
+  # by a constant. That is exactly what the per-country reporting level c does, so the model absorbed
+  # it perfectly and the arm scored BETTER than the control while appearing to test the assumption.
+  # A violation only counts if the ratio to the unperturbed mean VARIES WITHIN a country-season, so
+  # no single reporting number can undo it.
+  source(here::here("code/07_joint_model/joint_recovery.R"))
+  set.seed(4)
+  for (v in c("r0_by_country", "second_wave")){
+    ds <- jm_simulate_violation(th, d, v, seed = 77)
+    expect_true(jm_violation_is_real(ds), info = v)
+    expect_identical(attr(ds, "violation"), v)
+    # still on the real design: same shapes, same missing cells, counts non-negative
+    for (i in seq_along(d$y)){
+      expect_equal(dim(ds$y[[i]]), dim(d$y[[i]]))
+      expect_equal(is.na(ds$y[[i]]), is.na(d$y[[i]]))
+    }
+    expect_true(is.finite(jm_negll_cpp(th, ds)))
+  }
+  # the absorbable perturbation must be REJECTED by the same check, or it cannot protect anything
+  ds0 <- jm_simulate_violation(th, d, "none", seed = 77)
+  expect_false(jm_violation_is_real(ds0))
+  fake <- ds0; mu0 <- jm_fitted_cpp(th, d)$mu
+  attr(fake, "violation") <- "visibility_by_country"
+  attr(fake, "mu_ratio") <- lapply(seq_along(mu0), function(i) mu0[[i]] * 0 + 1.7)  # constant per cell
+  expect_false(jm_violation_is_real(fake))
+  # r0_by_country must enter the DYNAMICS: with no multiplier it reduces to the plain simulator
+  set.seed(1); a <- jm_simulate_violation(th, d, "r0_by_country", seed = 5, sd_log_r0 = 0)
+  set.seed(1); b <- jm_simulate(th, d, seed = 5)
+  expect_equal(a$y[[1]], b$y[[1]])
+})
+
+test_that("a recovery replicate skips the Hessian when it is not asked for intervals", {
+  # jm_recover_once used to compute the curvature intervals unconditionally, which is minutes per
+  # replicate thrown away, because the only thing it needed from them was the name-derived transform.
+  source(here::here("code/07_joint_model/joint_recovery.R"))
+  nm <- jm_par_names(d)
+  expect_equal(jm_par_kind(nm), jm_intervals(jm_fit(d, max_sweeps = 1L, cores = 1, verbose = FALSE))$kind[seq_along(nm)])
+  # these files are sourced, not a package, so shadow the binding jm_recover_once actually resolves
+  called <- 0L
+  real <- jm_intervals
+  assign("jm_intervals", function(...) { called <<- called + 1L; stop("Hessian computed") },
+         envir = globalenv())
+  on.exit(assign("jm_intervals", real, envir = globalenv()), add = TRUE)
+  r <- jm_recover_once(d, th, seed = 8, fit_args = list(max_sweeps = 1L, cores = 1),
+                       with_intervals = FALSE)
+  expect_equal(called, 0L)
+  expect_false("covered" %in% names(r$comparison))
+  expect_true(all(c("truth", "estimate", "truth_theta", "est_theta") %in% names(r$comparison)))
+  expect_true(is.finite(r$adequacy_excess))
+  # and it IS called when intervals are asked for
+  expect_error(jm_recover_once(d, th, seed = 8, fit_args = list(max_sweeps = 1L, cores = 1),
+                               with_intervals = TRUE), "Hessian computed")
+  expect_equal(called, 1L)
+})
+
+test_that("every figure in the default set actually renders", {
+  # The failure this catches: an aesthetic that names a column which is not in the plot's data.
+  # ggplot captures its data BY VALUE, so a column attached to the frame after the ggplot() call is
+  # invisible to every later layer -- and nothing complains until the plot is drawn. Two figures were
+  # broken that way for the length of one edit. ggplot_build() forces the evaluation that ggsave would.
+  suppressMessages({source(here::here("code/07_joint_model/joint_recovery.R"))
+                    source(here::here("code/07_joint_model/joint_report.R"))})
+  small <- jm_fit(d, max_sweeps = 2L, cores = 1, verbose = FALSE)
+  iv <- jm_intervals(small); id <- NULL
+  build <- function(p) expect_s3_class(ggplot2::ggplot_build(p), "ggplot_built")
+  # with intervals, which is how the report is written
+  build(plot_jm_design(small)); build(plot_jm_arrival(small))
+  build(plot_jm_fit_overview(small)); build(plot_jm_fit_country(small, d$countries[1]))
+  build(plot_jm_adequacy(small)); build(plot_jm_attack(small))
+  for (p in list(plot_jm_season_R0(small, iv), plot_jm_season_visibility(small, iv),
+                 plot_jm_country_S0(small, iv), plot_jm_country_reporting(small, iv),
+                 plot_jm_age_offsets(small, iv))) build(p)
+  # and WITHOUT intervals, the other branch of every one of those five
+  for (p in list(plot_jm_season_R0(small), plot_jm_season_visibility(small),
+                 plot_jm_country_S0(small), plot_jm_country_reporting(small),
+                 plot_jm_age_offsets(small))) build(p)
+})

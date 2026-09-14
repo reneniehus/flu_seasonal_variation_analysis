@@ -152,8 +152,68 @@ parameters on drivers and read the slopes at face value; no attenuation correcti
 earlier single replicate on a cut-down 2-country design suggested ~20% attenuation. That was an
 artefact of n = 1 on the wrong design and does not hold.)
 
+**4. Can the recovery test fail at all? (measured 2026-09-14) -- the sharpest limitation.** Studies
+1-3 all simulate from the model's own parameter space, so on their own they ask whether the OPTIMISER
+works and would certify the model however wrong its assumptions are about the world. So the harness
+also simulates from truths the model CANNOT represent (`jm_simulate_violation`,
+`jm_misspecification_check`), one replicate per arm on the real 12-country design:
+
+| arm | `R0_s` rank | visibility rank | **`S0_c` rank** | noise excess |
+|---|---|---|---|---|
+| control, truth representable | 1.00 | 0.96 | **0.97** | 1.25x |
+| each country's own `R0` (sd log 0.10, i.e. spanning 0.84-1.20) | 0.95 | 0.96 | **0.09** | 1.26x |
+| a second wave the SIR cannot make (+60% bump late in every season) | 0.93 | 0.96 | **0.99** | 1.24x |
+
+Three things follow, and all three matter more than any number in studies 1-3.
+
+- **The test is not vacuous.** It fails, decisively, on the project's target quantity.
+- **The season-level conclusions are robust; the country ranking is conditional.** Transmissibility and
+  visibility recover under both violations. But `S0_c` is identifiable ONLY BECAUSE `R0_s` is shared
+  across countries, and that is a double edge: if countries truly differ in transmissibility, the
+  difference has nowhere to go but into `S0_c`, and the susceptibility ranking degrades to noise.
+  A 10% between-country spread in `R0` is entirely plausible (school calendars, climate, housing), so
+  this is not an extreme stress test. **Report the `S0_c` ranking as conditional on shared
+  transmissibility, and say so.**
+- **The noise budget cannot see either violation** (1.24-1.26x against the control's 1.25x), so it is
+  not the diagnostic for this. Note also what that implies about the real-data 2.59x: a 60% spurious
+  late wave in every season costs essentially nothing in the noise budget, so the real gap is not a
+  missed secondary wave but something pervasive across the whole season -- which is what process noise
+  describes and what the filter should be judged against.
+
+The diagnostic that WOULD settle it is a per-country `R0` multiplier fitted as an alternative model and
+compared by likelihood. That is a model comparison, which is the learning layer's first job, and it is
+now the top item on that list.
+
 **Residual defect.** In 1 of 8 replicates, 1 of 12 countries fell into the flat-line optimum
 (dispersion collapses, no wave fitted): roughly a 1-2% failure rate per country-fit. The multi-start
 of the local blocks reduced this from 1-in-11 but did not remove it. It is DETECTABLE rather than
 silent -- a flat-lined country is obvious in figure 03 and in the per-country correlations -- so
 check for it on every real fit.
+
+## Are the headline claims robust? (stress-tested 2026-09-14)
+
+Two results carry the model's weight, so both were attacked directly rather than reported as found.
+
+**1. "Seasons differ more in visibility than in transmissibility" is the data, not the priors.** The
+worry is real: the priors are asymmetric by construction (`log R0 ~ N(log 1.5, 0.15)` against
+`delta ~ N(0, 0.5)`), so a tight prior on one and a loose prior on the other could manufacture
+exactly the asymmetry we report. Refitting under four prior settings says it does not:
+
+| prior setting | transmissibility sd(log) | season visibility sd(log) |
+|---|---|---|
+| as fitted (R0 0.15, visibility 0.50) | 0.036 | 0.377 |
+| R0 prior widened 4x to 0.60 | 0.037 | 0.377 |
+| visibility prior tightened to 0.15 | 0.038 | 0.322 |
+| **fully symmetric, both 0.50** | **0.037** | **0.377** |
+
+Visibility varies about ten times as much as transmissibility under every setting, including the
+symmetric one, and widening the `R0_s` prior fourfold changes its spread by 0.001. What the prior
+*does* control is the LEVEL: widening it moved the fitted `R0_s` range from 1.51-1.71 to 1.54-1.76.
+So report the spread as a finding and the level as prior-informed.
+
+**2. The 2.6x noise gap is not an artefact of how the scatter is measured.** The comparison needs a
+choice of smoothing window and of which weeks count as epidemic, and either could be doing the work.
+Across 18 specifications (3-, 5- and 7-week moving average; epidemic threshold 5, 20 and 50 per
+100 000; with and without the small-sample correction) the excess runs **2.13x to 3.65x**. The
+reported 2.59x sits in the lower half of that range, so the gap is robust and the headline number is
+the conservative end of it, not the flattering one.
