@@ -288,6 +288,20 @@ test_that("jm_fit's reported flat check describes the theta it actually returns"
                small$flat$flat)
   expect_equal(small$n_flat_unresolved, sum(small$flat$flat))
   expect_true(is.logical(small$converged))
+  # `converged` must describe the WHOLE fit, not just the sweep loop. It read FALSE on a fit whose
+  # three stages had all succeeded, because it meant "the sweep loop did not run out of sweeps" --
+  # and it also called a break on the very last sweep a failure.
+  expect_equal(small$converged,
+               isTRUE(all(small$conv_local == 0L) && small$conv_shared == 0L &&
+                      small$conv_polish == 0L && small$n_flat_unresolved == 0L))
+  expect_true(is.logical(small$sweeps_hit_tol))
+  # the sweep loop's own status is reported separately, and agrees with the trace
+  sh <- small$trace[small$trace$step == "shared", ]
+  if (nrow(sh) >= 2) expect_equal(small$sweep_last_gain, -tail(diff(sh$negll), 1), tolerance = 1e-8)
+  expect_equal(small$sweeps_hit_tol, isTRUE(small$sweep_last_gain < 0.05))
+  # the extrapolated tail is either a positive number of nats or NA, never negative or infinite
+  expect_true(is.na(small$sweep_tail_nats) ||
+              (is.finite(small$sweep_tail_nats) && small$sweep_tail_nats >= 0))
   expect_named(small$flat_thresholds, c("attack_min", "epi_frac_min"))
 })
 

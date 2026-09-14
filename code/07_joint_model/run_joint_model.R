@@ -19,6 +19,24 @@ d = jm_build_data(candidates, models_in, demo, min_seasons = 5L)   # 5 keeps Spa
 cat("\n--- fitting ---\n")
 fit = jm_fit(d, cores = max(1L, parallel::detectCores() - 1L))
 
+# Say plainly whether the optimiser succeeded and whether any country is stuck flat. Both were only
+# in the returned object before, so a fit could be read as fine while a country carried no wave at all.
+cat("\n--- convergence ---\n")
+cat(sprintf("converged: %s   (all %d local blocks %s, shared block %s, joint polish %s, %d flat)\n",
+            fit$converged, d$n_country,
+            if (all(fit$conv_local == 0L)) "ok" else "FAILED",
+            if (fit$conv_shared == 0L) "ok" else "FAILED",
+            if (fit$conv_polish == 0L) "ok" else "FAILED", fit$n_flat_unresolved))
+cat(sprintf("block descent: %d sweeps, %s; last sweep gained %.2f nats, extrapolated tail %.1f;\n",
+            fit$sweeps, if (fit$sweeps_hit_tol) "reached tolerance" else "ran out of sweeps",
+            fit$sweep_last_gain, fit$sweep_tail_nats))
+cat(sprintf("               the joint polish then gained %.1f nats, so the tail is cleared.\n",
+            fit$polish_gain))
+if (fit$n_flat_unresolved > 0){
+  cat("\nUNRESOLVED FLAT LINE -- these countries fit no wave, so their S0 and reporting are meaningless:\n")
+  print(fit$flat[fit$flat$flat, ], row.names = FALSE)
+}
+
 cat("\n--- uncertainty: curvature intervals ---\n")
 iv = jm_intervals(fit)
 print(head(iv[, c("parameter","estimate","lower","upper")], 20), row.names = FALSE)

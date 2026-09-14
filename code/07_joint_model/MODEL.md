@@ -88,7 +88,19 @@ fit by **block coordinate descent**: each country's local block is optimised wit
 fixed, all twelve in parallel, then the shared block is optimised with the locals fixed, repeated and
 finished with a joint polish. That exploits the separability above: a country's own likelihood is a
 twelfth of the joint one, so a sweep costs about 33 full-likelihood evaluations against 185 for one
-finite-difference gradient of the flat problem. About 170 s for the full 12-country fit.
+finite-difference gradient of the flat problem. 100-170 s for the full 12-country fit depending on
+machine load; the curvature intervals and the two Hessians behind the identifiability report cost
+another 7 minutes or so, which is why a recovery replicate that does not need intervals skips them.
+
+**How to read the convergence report.** The sweep loop is EXPECTED to run out of sweeps: its gain
+decays geometrically (48.5, 10.2, ..., 2.5, 2.3 nats) and never reaches a 0.05-nat tolerance in 15,
+extrapolating to a tail of about 24 nats. The joint polish is what clears that tail, and it gained 31
+nats on the real fit -- slightly more than the extrapolation, the difference being cross-block
+curvature the sweeps cannot see by construction. So the sweep loop's status is reported separately
+(`sweeps_hit_tol`, `sweep_tail_nats`) and `converged` means what a reader expects: all twelve local
+blocks, the shared block and the joint polish all returned success, and no country is stuck flat. It
+previously meant only "the sweep loop did not run out of sweeps", so it read FALSE on a fit where all
+three stages had succeeded -- a flag that is always FALSE is a flag nobody reads.
 
 Two things guard the optimiser, both of them there because the failure they prevent actually happened.
 

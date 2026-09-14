@@ -573,7 +573,12 @@ reference it is tested against.
    local block from three points; worth 406 nats of likelihood and took the unidentified directions from
    9 to 0. A residual 1-2% per-country failure rate remains and must be checked for on every fit.
 2. Block coordinate descent leaves a slow tail when the shared and local blocks are correlated (about 2
-   nats per sweep at the cap). The joint polish recovers it (24-31 nats), so keep both stages.
+   nats per sweep at the cap). The joint polish recovers it (24-31 nats), so keep both stages. Measured
+   2026-09-14: the per-sweep gain decays geometrically at ratio ~0.91, so the tail after 15 sweeps
+   extrapolates to ~24 nats and the polish gained 31 -- the excess being cross-block curvature the
+   sweeps cannot see. So `converged` was redefined to mean all three stages succeeded and no country is
+   flat, with the sweep loop's own status reported separately: as "sweeps < max_sweeps" it read FALSE on
+   every real fit, and a flag that is always FALSE is a flag nobody reads.
 
 **Identifiability, measured.** Every parameter family contracts between 0.69 and 0.94 against its prior,
 so nothing in this model is a restatement of an assumption. Contrast the pilot, where susceptibility
