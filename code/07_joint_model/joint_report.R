@@ -399,6 +399,12 @@ plot_jm_recovery = function(rec, d, summ = NULL){
 # ================= write the default set =================
 save_jm_report = function(fit, id = NULL, iv = NULL, rec = NULL, dir = "output/joint_model"){
   dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  # Omitting `iv` is legitimate -- a quick look without waiting minutes for the Hessian -- but it must
+  # be announced, because figures 06-10 then carry NO uncertainty and look no different for it. The
+  # pipeline wrote the entire set that way for two days without anything saying so.
+  if (is.null(iv))
+    warning("no intervals supplied: figures 06-10 will be written WITHOUT uncertainty bars. ",
+            "Pass iv = jm_intervals(fit) for the publishable set.", call. = FALSE)
   d = fit$d; man = character(0)
   put = function(file, plot, w, h, what){
     ggsave(file.path(dir, file), plot, width = w, height = h, dpi = 115, limitsize = FALSE)

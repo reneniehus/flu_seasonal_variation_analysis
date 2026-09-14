@@ -460,3 +460,21 @@ test_that("every figure in the default set actually renders", {
                  plot_jm_country_S0(small), plot_jm_country_reporting(small),
                  plot_jm_age_offsets(small))) build(p)
 })
+
+test_that("the pipeline writes the figure set WITH uncertainty intervals", {
+  # The regression this guards: run_joint_model.R computed the curvature intervals, saved them into
+  # joint_fit.rds, and then called save_jm_report(fit, id) without them -- so every published figure
+  # 06-10 was drawn with no error bars for two days. Nothing complained, because a figure without
+  # uncertainty renders exactly as cleanly as one with it. Checked statically, since the runner is a
+  # script rather than a function.
+  runner <- paste(readLines(here::here("code/07_joint_model/run_joint_model.R")), collapse = "\n")
+  call <- regmatches(runner, regexpr("save_jm_report\\([^)]*\\)", runner))
+  expect_length(call, 1L)
+  expect_match(call, "\\biv\\b", info = paste("save_jm_report call was:", call))
+  # and the writer must say so when they are absent, rather than quietly dropping them
+  suppressMessages({source(here::here("code/07_joint_model/joint_recovery.R"))
+                    source(here::here("code/07_joint_model/joint_report.R"))})
+  expect_warning(save_jm_report(jm_fit(d, max_sweeps = 1L, cores = 1, verbose = FALSE),
+                                dir = withr::local_tempdir()),
+                 "WITHOUT uncertainty")
+})
