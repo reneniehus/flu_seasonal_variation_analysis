@@ -30,3 +30,5 @@ figure/
 # ---- model output / large files written outside the repo ----
 output/*-forecast-hub/
 packrat/lib*/
+output/comp_model/
+output/joint_model/

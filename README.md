@@ -116,6 +116,25 @@ code/03_report/                eyeballing_report.Rmd (data-quality / dynamics re
 code/04_modelling/             build_slim_panel.R (write the committed panel via the shared stitch),
                                fit_methods_demo.R (every method, all seasons), descriptive_overview.R,
                                ekf_overview.R
+code/07_joint_model/           THE WORKING MODEL (branch flu_comp_model): all countries and seasons
+                               fitted jointly. MODEL.md (the abstract, what varies where, what was
+                               cut and why, the recovery results), joint_model.cpp (the entire
+                               log-posterior in C++), joint_model.R (data, packing, block-coordinate
+                               fitting, the flat-line protector, identifiability and adequacy
+                               diagnostics), joint_recovery.R (intervals; simulate-and-recover, the
+                               misspecification arms that make the test able to FAIL, and the driver
+                               hook for the learning layer), joint_report.R (the default numbered
+                               figure set), run_joint_model.R, run_joint_recovery.R
+code/06_comp_model/            the compartmental PILOT that preceded it, kept for its assumption
+                               record and its data layer (build_comp_data is still used):
+                               ASSUMPTIONS.md (every assumption, with provenance and evidence),
+                               comp_model_settings.R, contact_matrix.R (exact-R0 scaling),
+                               comp_model_core.R (R reference) + comp_model_core.cpp (identical
+                               C++ engine), comp_model_data.R, comp_model_fit.R (two-stage EKF),
+                               comp_model_report.R (eyeballing figures), run_comp_model.R,
+                               run_age_experiment.R (age-specific reporting vs susceptibility,
+                               12 countries, against the PHIRST attack-rate profile),
+                               comp_model_joint.R + run_comp_model_joint.R (shared season R0)
 code/05_analysis/              the driver analysis: analysis_helpers.R (shared Gibbs samplers, rhat,
                                VE-vs-dominant rule), prepare_descriptors.R, dominant_subtype.R,
                                analyse_patterns.R, plot_patterns.R, plot_vax_scatter.R,
@@ -141,6 +160,7 @@ Where each kind of information lives:
 | `documentation/quickstart.md` | how to set up and run |
 | `documentation/data_overview.md` | what data is present (`data`, `models_in`, indicators) |
 | `documentation/documentation.Rmd` | the model maths / science (SIR, inference, contact matrix) |
+| `code/07_joint_model/MODEL.md` | the WORKING model: its abstract, what varies where, what was cut and why, and whether it recovers a known truth |
 | `documentation/decisions.md` | **why** — rationale for key modelling / method / data decisions |
 | `documentation/analysis_strategy.md` | the driver analysis — strategy, principles, what we've learned, ranked next steps |
 | `documentation/findings_descriptors.md` | results of the descriptor / driver analyses |
