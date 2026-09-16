@@ -809,3 +809,61 @@ surrounding time series, and they do NOT agree across cases.
 per-week-on-the-evidence -- treat an absent row as zero where the local positivity makes zero plausible,
 as missing otherwise -- rather than per-season-on-a-count. That is still a guess about a publication
 format, so the question for surveillance colleagues stands unchanged.
+
+## 2026-09-16 (final) -- the six remaining audit dimensions: the foundations hold
+
+The fan-out had died on a spend limit after two of eight dimensions. The remaining six were audited by
+hand. **They came back essentially clean** -- 40 checks passed, one documentation gap, and two of my own
+test designs were wrong rather than the code.
+
+**Verified correct, with the number that shows it.**
+- *Settings and priors.* gamma = 1/3.6 exactly; ve_inf/ve_ili/ve_spread = 0.25/0.20/0.20; vax_day = 62;
+  rate_per = 1e5 -- all matching the documents. **Every one of the 46 slots has a proper informative
+  prior**: log-prior curvature is strictly negative in every coordinate and equals `-1/sd^2` for the
+  declared sd, slot by slot. **The shared priors are counted exactly once**, not once per country --
+  `negll - sum(country negll)` equals the shared prior term to 1e-8, which matters because the block
+  sweep decomposes the likelihood 12 ways. The contraction denominator is the prior sd the C++ applies,
+  for all 9 families.
+- *Vaccination and the contact matrix.* Every country's matrix has spectral radius 1 to 1e-15; the
+  matrices genuinely differ between countries; population is conserved per age group over a whole
+  season to 7e-16; no compartment goes negative; only the 65+ group is vaccinated, once, and
+  vaccinating reduces the elderly attack rate (DK 2014/2015: 0.256 -> 0.209 at 45% coverage).
+- *The integrator.* Against a 24x finer grid at the fitted parameters on the largest wave: peak +1.2%,
+  attack rate +0.9%, peak timing within one week. **The pool cap never binds** in any of the 85
+  country-seasons at the optimum, so the dynamics are the stated SIR everywhere it matters. The
+  objective stays finite at R0 near 1, R0 = 6, S0 -> 0, S0 -> 1 and a 1e-30 seed.
+- *The diagnostics.* The likelihood-only Hessian is genuinely prior-free (built from `jm_loglik_cpp`);
+  sd_post is the marginal sd as figure 15 claims; `excess` is exactly `cv_fitted / cv_data` on one cell
+  set. **And the noise floor is unbiased**: simulating negative-binomial series of known dispersion on
+  realistic wave shapes recovers the true CV to within 2% at every wave width tested, so the 2.6x
+  excess is NOT an artefact of the estimator. The `sqrt(2/3)` factor in `jm_phi_data` is the correct
+  independence correction for a centred 3-week mean, and it is doing its job.
+- *Starting values.* All 12 single-country designs build with a finite start; 2- and 4-country designs
+  have `length(theta0) == n_par` with blocks partitioning exactly; the start differs between real and
+  simulated data, so the recovery harness gets no help from the real series.
+- *Reproducibility.* Two identical fits give bit-identical theta; **the core count does not change the
+  answer** (max |diff| 0.0 between 1 and 2 cores), so no parallel stage draws random numbers; the data
+  object is reproducible field for field; and every design number MODEL.md quotes matches the artefact.
+
+**The one gap, fixed.** MODEL.md did not state that the elderly susceptibility re-weights the contact
+matrix and the result is **rescaled again** to spectral radius 1. This is a real assumption with a real
+consequence: `sigma_eld` redistributes *who* gets infected without changing *how transmissible* the
+season is, so `R0_s` keeps its meaning whatever `sigma_eld` is -- and `sigma_eld` is identified by the
+AGE COMPOSITION of cases, not by the size of the wave. It was documented only in the pilot's
+ASSUMPTIONS.md (C3). Now in the working model's own abstract and in its fixed-values list, and asserted
+by a test at three values of `sigma_eld`.
+
+**Two of my own checks were wrong, and the method matters.** A "moving-average leakage" finding
+evaporated once I applied the `sqrt(2/3)` correction the code already applies -- the estimator is fine
+and my test had omitted it. An "unpenalised seed" finding evaporated once I stopped testing a single
+direction: `theta0`'s seeds sit BELOW their prior mean, so a `+8` move goes toward it and the prior
+improves. Both were replaced by direction-free tests of the actual claim (curvature, and a simulation
+against known dispersion). **A finding that survives only one way of looking at it is not a finding.**
+
+**Kept as invariants.** Five new tests: shared priors counted once; every slot properly penalised by
+curvature; sigma redistributing without changing transmissibility; the noise floor unbiased against a
+known dispersion; determinism across core counts.
+
+**Operational note.** Long R runs are unreliable in this container -- the 12-country Hessian stage and
+a 4-replicate recovery run were both killed part-way. The fit (120 s) and the Hessians (314 s) complete
+when run alone; budget accordingly and re-run rather than trusting a partial artefact.

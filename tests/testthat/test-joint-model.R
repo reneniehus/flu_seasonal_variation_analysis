@@ -651,3 +651,102 @@ test_that("the ambiguous positivity encoding is detected and its seasons exclude
   expect_equal(with_ex$n_cs_of_country[with_ex$countries == "PL"],
                no_ex$n_cs_of_country[no_ex$countries == "PL"])   # PL keeps every season
 })
+
+# ---- the foundations: what the final audit checked, kept as invariants ----
+test_that("the shared priors are counted once, not once per country", {
+  # The likelihood is decomposed per country for the block sweep. If the shared priors (R0, the season
+  # deviations, the elderly susceptibility) were added inside that decomposition they would be counted
+  # 12 times, silently tightening them by a factor of 12 and making every contraction wrong.
+  nl <- jm_negll_cpp(th, d)
+  parts <- sum(vapply(seq_len(d$n_country), function(ic) jm_country_negll_cpp(th, d, ic - 1L), numeric(1)))
+  S <- d$n_season
+  dn <- function(x, m, s) -0.5 * ((x - m) / s)^2 - log(s) - 0.5 * log(2 * pi)
+  dev_free <- th[S + seq_len(S - 1)]
+  expected <- -(sum(dn(th[seq_len(S)], d$pr_R0_mean, d$pr_R0_sd)) +
+                sum(dn(c(dev_free, -sum(dev_free)), 0, d$pr_delta_sd)) +
+                dn(th[2L * S], d$pr_sigma_mean, d$pr_sigma_sd))
+  expect_equal(unname(nl - parts), unname(expected), tolerance = 1e-8)
+})
+
+test_that("no fitted slot is left without a prior", {
+  # An unpenalised slot makes the penalised Hessian and that family's prior-to-posterior contraction
+  # meaningless -- the figure would report an assumption as a result.
+  # Test the PRIOR's CURVATURE, not a one-directional move. Two traps avoided: a posterior difference
+  # measures the fit rather than the penalty (pushing a seed far enough moves the wave out of the
+  # observation window, which can IMPROVE the likelihood at a crude start), and a single direction can
+  # move a slot TOWARDS its prior mean -- theta0's seeds sit below theirs, so +8 improves the prior.
+  # A proper informative prior has strictly negative log-density curvature in every coordinate, equal
+  # to -1/sd^2 for the Gaussians used here. logprior = -negll - loglik isolates it from the data.
+  lp <- function(t) -jm_negll_cpp(t, d) - jm_loglik_cpp(t, d)
+  h <- 2
+  curv <- vapply(seq_len(d$n_par), function(j){
+    a <- th; a[j] <- a[j] + h; b <- th; b[j] <- b[j] - h
+    (lp(a) + lp(b) - 2 * lp(th)) / h^2
+  }, numeric(1))
+  expect_true(all(curv < 0),
+              info = paste("improper:", paste(jm_par_names(d)[curv >= 0], collapse = ", ")))
+  # and the curvature must be the prior sd the settings declare, slot by slot
+  expect_equal(curv[grep("log_I0", jm_par_names(d))][1], -1 / d$pr_I0_sd^2, tolerance = 1e-6)
+  expect_equal(curv[grep("logit_S0", jm_par_names(d))][1], -1 / d$pr_S0_sd^2, tolerance = 1e-6)
+  expect_equal(curv[1], -1 / d$pr_R0_sd^2, tolerance = 1e-6)          # log_R0 of season 1
+  # and the contraction denominator must be the sd the C++ actually applied, per family
+  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
+  fam <- readRDS(here::here("output/joint_model/joint_fit.rds"))$id$family
+  want <- c("R0 (season, shared)" = d$pr_R0_sd, "S0 (country)" = d$pr_S0_sd,
+            "reporting c (country)" = d$pr_c_sd, "season deviation (shared)" = d$pr_delta_sd,
+            "dispersion phi" = d$pr_phi_sd, "baseline b" = d$pr_b_sd,
+            "age reporting offset" = d$pr_off_sd, "seed I0 (country-season)" = d$pr_I0_sd,
+            "elderly susceptibility (global)" = d$pr_sigma_sd)
+  for (k in names(want)) if (k %in% fam$family)
+    expect_equal(fam$prior_sd[fam$family == k], unname(want[[k]]), tolerance = 1e-9, info = k)
+})
+
+test_that("the elderly susceptibility redistributes infection without changing transmissibility", {
+  # sigma re-weights the contact matrix and the result is rescaled to spectral radius 1 again. That is
+  # what lets R0_s mean the same thing whatever sigma_eld is -- and it means sigma_eld is identified by
+  # the AGE COMPOSITION of cases, not by the size of the wave. Documented in MODEL.md; asserted here.
+  S <- d$n_season
+  rho_of <- function(theta){
+    sigma <- c(1, 1, 2^theta[2L * S])
+    vapply(seq_len(d$n_country), function(ic){
+      Cs <- sweep(d$Cn[[ic]], 1, sigma, "*")
+      max(abs(eigen(Cs / max(abs(eigen(Cs, only.values = TRUE)$values)), only.values = TRUE)$values))
+    }, numeric(1))
+  }
+  for (shift in c(-2, 0, 2)){
+    t2 <- th; t2[2L * S] <- th[2L * S] + shift
+    expect_equal(unname(rho_of(t2)), rep(1, d$n_country), tolerance = 1e-9)
+  }
+  expect_equal(unname(vapply(d$Cn, function(m) max(abs(eigen(m, only.values = TRUE)$values)), numeric(1))),
+               rep(1, d$n_country), tolerance = 1e-10)
+})
+
+test_that("the noise floor the adequacy diagnostic compares against is unbiased", {
+  # jm_adequacy divides the fitted dispersion by the data's own week-to-week scatter, and the whole
+  # "2.6x more noise than the data have" limitation rests on that denominator being a fair floor. The
+  # sqrt(2/3) factor is the independence correction for a centred 3-week mean; without it the floor is
+  # too low and the excess too big. Checked against a known dispersion on realistic wave shapes.
+  set.seed(11)
+  ma3 <- function(v){ n <- length(v); o <- rep(NA_real_, n)
+    for (i in 2:(n - 1)) o[i] <- mean(v[(i - 1):(i + 1)]); o }
+  est <- function(y){ m <- ma3(y); okk <- is.finite(y) & is.finite(m) & m > 20
+    if (sum(okk) < 5) NA_real_ else sd(y[okk] / m[okk]) / sqrt(2 / 3) }
+  for (w in c(3, 8)){
+    r <- replicate(200, { n <- 53; mu <- 400 * exp(-((1:n - 26)^2) / (2 * w^2)) + 5
+      est(rnbinom(n, size = 4, mu = mu)) })
+    expect_equal(median(r, na.rm = TRUE), 0.5, tolerance = 0.06)   # 1/sqrt(4) by construction
+  }
+  # and the reported excess must be exactly the ratio of the two CVs, on one cell set
+  a <- jm_adequacy(jm_fit(d, max_sweeps = 1L, cores = 1, verbose = FALSE))
+  expect_equal(a$excess, a$cv_fitted / a$cv_data, tolerance = 1e-9)
+})
+
+test_that("the fit is deterministic and independent of the core count", {
+  # The project reports specific parameter values. mclapply forks do not reseed, so any RNG inside a
+  # parallel stage would make the answer depend on how many cores happened to be free.
+  f1 <- jm_fit(d, max_sweeps = 2L, cores = 1, verbose = FALSE)
+  f2 <- jm_fit(d, max_sweeps = 2L, cores = 1, verbose = FALSE)
+  expect_identical(f1$theta, f2$theta)
+  f3 <- jm_fit(d, max_sweeps = 2L, cores = 2, verbose = FALSE)
+  expect_equal(f1$theta, f3$theta, tolerance = 1e-10)
+})

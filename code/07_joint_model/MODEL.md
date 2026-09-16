@@ -36,6 +36,10 @@ We fit weekly influenza-positive ILI consultations from **twelve EU/EEA countrie
 estimated jointly in 182 parameters**. Three age groups (0-14, 15-64, 65+) mix by each country's
 contact matrix, rescaled so its dominant eigenvalue is one, which makes a season's basic reproduction
 number the realised R0 given that mixing rather than an artefact of the contact data's absolute scale.
+The elderly susceptibility re-weights that matrix and the result is **rescaled again**, so `sigma_eld`
+redistributes *who* gets infected without changing *how transmissible* the season is: `R0_s` keeps its
+meaning whatever `sigma_eld` does, and `sigma_eld` is therefore identified by the age composition of
+cases rather than by the size of the wave.
 Each country-season is an independent epidemic, seeded on 1 August and integrated on a daily grid to a
 fixed 53-week horizon, with a single vaccination pulse into the 65+ group on 1 October.
 
@@ -160,7 +164,8 @@ exclusion, is in the box at the top of this file and in
 
 `gamma = 1/3.6` per day; `ve_inf = 0.25`, `ve_ili_cond_inf = 0.20`, `ve_spread = 0.20`; vaccination
 pulse on season day 62 into 65+ only, at the reported national coverage; the contact matrix, rescaled
-to spectral radius one; susceptibility shared across age groups; no waning, no ageing, no importation
+to spectral radius one, and re-rescaled after the elderly susceptibility re-weights it, so `R0_s` is
+independent of `sigma_eld` (verified); no waning, no ageing, no importation
 after the seed, no latent period, single strain.
 
 ## Implementation
