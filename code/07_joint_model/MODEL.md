@@ -25,6 +25,36 @@ One page. What it assumes, why it is simpler than the compartmental pilot, and w
 > countries** (AT, BG, CZ, HU, IS, IT, LT, LV, MT, PL, RO, SK), so this matters more if the design ever
 > expands — notably to Iceland or Malta, both of which otherwise qualify.
 >
+> ### What the surrounding time series say (analysed 2026-09-16)
+>
+> Four tests, and they do **not** give the same answer for the two cases.
+>
+> 1. **Omission is not the format's way of writing zero.** 18 of 30 countries have **zero** absent rows
+>    and write explicit zeros throughout. Only IT and MT omit without ever writing a zero. Ten
+>    countries do BOTH — CZ has 79 explicit zeros *and* 30 absent rows; PL has 136 and 1. So an absent
+>    row is a country-and-period reporting lapse, not a documented encoding.
+> 2. **Absent weeks are not preferentially off-season.** Median season week 19 with 32% at week 40+,
+>    against 24 and 37% for explicit zeros. Quiet weeks they are, but not off-season ones.
+> 3. **Binomial plausibility.** For each absent week, P(0 detections | that week's tests, local
+>    positivity from published weeks within ±3): zero is plausible (P ≥ 0.05) for **82%** of the 177
+>    with usable neighbours, against **96%** for genuine explicit zeros — so absent weeks are
+>    measurably *less* consistent with being true zeros than real zeros are. 10 weeks are essentially
+>    impossible as zeros.
+> 4. **The two design cases come out differently.**
+>    - **PL 2024/2025 week 3**: 13 tests, neighbours **0 detections over 114 tests** (0% positivity),
+>      **P(0) = 1.000**. A one-off gap in a quiet pre-season week. **Zero is overwhelmingly plausible.**
+>    - **CZ 2024/2025**: week 34 has 56 tests against 7.3% local positivity, so ~4 detections were
+>      expected and **P(0) = 0.014**. Weeks 37–39 are plausible as zeros; weeks 40–52 have **no
+>      published neighbour at all** — CZ's detections feed went dark from 2025-03-26 and did not
+>      resume until the next season, so those weeks are unknowable from the data. **"Unknown" fits CZ.**
+>
+> **Reading:** there is no single answer. CZ 2024/2025 should stay excluded — one week almost certainly
+> had detections and sixteen are unknowable. PL 2024/2025 is a false positive of a count-based rule and
+> would be recovered by `ambiguous_min_weeks = 2`. The general rule the evidence supports is
+> per-week-on-the-evidence (treat as zero where the local positivity makes zero plausible, as missing
+> otherwise) rather than per-season-on-a-count — **but that is still a guess about a publication
+> format, so the question above stands.**
+>
 > `erviss_encoding_ambiguous()` (`stitch_iliplus.R`) derives the affected list from the model inputs;
 > `jm_build_data(exclude_ambiguous_positivity = FALSE)` fits them anyway, and
 > `ambiguous_min_weeks = 2` tolerates a stray interior week instead of losing the season.

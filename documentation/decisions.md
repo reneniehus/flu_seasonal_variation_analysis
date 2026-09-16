@@ -780,3 +780,31 @@ exclusions should be reverted, recovering 110 panel weeks and 2 fitted country-s
 the count is genuinely unpublished**, the exclusion stays, and the separate defect of a trailing run
 shortening the grid rather than leaving holes should also be fixed. Either way this is a question about
 what ECDC's publication format means, not about our code.
+
+**Which reading is more plausible? (analysed 2026-09-16, owner's question)** Four tests on the
+surrounding time series, and they do NOT agree across cases.
+
+1. **Omission is not the format's encoding for zero.** 18 of 30 countries have ZERO absent rows and
+   write explicit zeros throughout; only IT and MT omit without ever writing a zero; ten countries do
+   both (CZ: 79 explicit zeros AND 30 absent rows; PL: 136 and 1). So an absent row is a
+   country-and-period reporting lapse, not a documented convention -- which argues against a blanket
+   "absent = 0" rule.
+2. **Absent weeks are not preferentially off-season**: median season week 19, 32% at week 40+, against
+   24 and 37% for explicit zeros.
+3. **Binomial plausibility.** P(0 detections | that week's tests, local positivity from published weeks
+   within +/-3 weeks) is >= 0.05 for 82% of the 177 absent weeks with usable neighbours, against 96%
+   for genuine explicit zeros. So absent weeks are measurably LESS consistent with being true zeros
+   than real zeros are; 10 are essentially impossible as zeros.
+4. **The two fitted cases differ in kind.**
+   - PL 2024/2025 week 3: 13 tests, neighbours 0 detections over 114 tests, P(0) = 1.000. Zero is
+     overwhelmingly plausible -- a one-off gap in a quiet pre-season week.
+   - CZ 2024/2025: week 34 has 56 tests against 7.3% local positivity (~4 detections expected),
+     P(0) = 0.014; weeks 37-39 are plausible; weeks 40-52 have no published neighbour at all, because
+     CZ's detections feed went dark from 2025-03-26 and resumed only in the next season. "Unknown"
+     fits CZ.
+
+**Consequence.** Keep CZ 2024/2025 excluded. PL 2024/2025 is a false positive of a count-based rule
+(`ambiguous_min_weeks = 2` recovers it). The rule the evidence actually supports is
+per-week-on-the-evidence -- treat an absent row as zero where the local positivity makes zero plausible,
+as missing otherwise -- rather than per-season-on-a-count. That is still a guess about a publication
+format, so the question for surveillance colleagues stands unchanged.
