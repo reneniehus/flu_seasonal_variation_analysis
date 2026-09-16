@@ -111,8 +111,8 @@ if (n_misspec > 0){
 saveRDS(out, "output/joint_model/joint_recovery.rds")
 cat("\n--- figure ---\n")
 if (!is.null(out$local)) {
-  ggplot2::ggsave("output/joint_model/13_recovery.png", plot_jm_recovery(out$local$rec, d, out$local$summary),
+  ggplot2::ggsave("output/joint_model/16_recovery.png", plot_jm_recovery(out$local$rec, d, out$local$summary),
                   width = 10, height = 7, dpi = 115)
-  cat("wrote output/joint_model/13_recovery.png\n")
+  cat("wrote output/joint_model/16_recovery.png\n")
 }
 cat("DONE\n")

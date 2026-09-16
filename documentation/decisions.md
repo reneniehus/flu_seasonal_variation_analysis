@@ -589,7 +589,7 @@ so nothing in this model is a restatement of an assumption. Contrast the pilot, 
 looked well determined only because it was borrowing the tight transmissibility prior.
 
 **The honest limitation.** Every country needs about 2.6x more observation noise than its own
-week-to-week scatter can explain (`jm_adequacy`, figure 05). That excess is the deterministic mean
+week-to-week scatter can explain (`jm_adequacy`, figure 08). That excess is the deterministic mean
 failing to follow the wave, written off as measurement error. It is the trigger condition for restoring
 the filter, and the filter should be judged on whether it CLOSES THAT GAP rather than on whether it
 moves the estimates. Stress-tested 2026-09-14 across 18 ways of measuring the scatter (smoothing window
@@ -682,7 +682,7 @@ field. 37 such checks came back clean. **The data object is what it says it is.*
 2. **The attack rate was a window quantity reported as a season quantity.** `n_weeks` doubled as the
    integration horizon, so each country-season's epidemic was integrated only as far as that country's
    surveillance series happened to run (33 to 53 weeks). Five of 86 cells moved by more than 5% and
-   IT 2015/2016 by **15%** (window 38 weeks) purely from data availability -- in a quantity figure 11
+   IT 2015/2016 by **15%** (window 38 weeks) purely from data availability -- in a quantity figure 14
    calls reporting-free and invites comparison with cohort evidence. The dynamics now run to a fixed
    53-week horizon everywhere while only the observed weeks feed the likelihood, so the negative
    log-likelihood is unchanged to the last bit (verified) and the attack rate is comparable across
@@ -757,7 +757,8 @@ confirmation by surveillance colleagues.
   than a truncation).
 
 **What the exclusion costs.** 12 countries and 8 seasons all survive; the design goes from 86
-country-seasons / 184 parameters to **84 / 181**. CZ additionally loses its ERVISS baseline slot,
+country-seasons / 184 parameters to **85 / 182** (the first pass dropped PL 2024/2025 too, on a
+count-based rule; the evidence-based rule below keeps it). CZ additionally loses its ERVISS baseline slot,
 because 2024/2025 was CZ's only ERVISS season -- which is the right outcome, since that slot was
 otherwise being fitted with no off-season behind it (the defect the audit flagged). 2024/2025 now rests
 on 8 countries rather than 10.

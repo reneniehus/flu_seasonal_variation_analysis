@@ -31,29 +31,49 @@ One page. What it assumes, why it is simpler than the compartmental pilot, and w
 
 ## Abstract
 
-We fit weekly influenza-positive ILI consultations from twelve EU/EEA countries over eight seasons
-with a single age- and vaccination-structured SIR, estimated jointly. Three age groups (0-14, 15-64,
-65+) mix by each country's contact matrix, rescaled so its dominant eigenvalue is one, which makes a
-season's basic reproduction number the realised R0 given that mixing rather than an artefact of the
-contact data's absolute scale. Each country-season is an independent epidemic, seeded on 1 August and
-integrated on a daily grid, with a single vaccination pulse into the 65+ group on 1 October. What
-varies where is the model's central design and is chosen so that each quantity is identified by a
-different feature of the data. Transmissibility `R0_s` is assumed to **vary between seasons and to be
-the same across countries**, because the dominant subtype is a Europe-wide property of the virus;
-initial susceptibility `S0_c` is assumed to **vary between countries and to be the same across that
-country's seasons**; and the elderly's relative susceptibility per contact is **assumed the same
-everywhere**, one number, because it is biology rather than surveillance. On the observation side the
-reporting proportion, the expected positive consultations per infection, is assumed to **vary between
-countries** and, through two offsets, **between age groups within a country**, but to be **the same
-across that country's seasons** apart from one Europe-wide deviation per season that is **constrained
-to average zero**, so the country level and the season deviation are separately identified rather than
-sliding against each other. The seed size is left to **vary freely between country-seasons**: it is
-the model's only handle on when a wave arrives, and it cannot be shared without forcing every season
-to arrive at the same time. Observed counts are negative-binomial around the deterministic mean with a
-country-specific dispersion, which lets the 29% of weeks that read exactly zero carry their proper
-weight instead of being pushed through a Gaussian that would place a sixth of its mass below zero. The
-infectious period, the three vaccine effects and the vaccination timing are fixed from external
-estimates; no parameter is allowed to vary in more than one direction at a time.
+We fit weekly influenza-positive ILI consultations from **twelve EU/EEA countries over eight seasons —
+85 country-seasons, 8 685 observed age-week cells — with a single age- and vaccination-structured SIR,
+estimated jointly in 182 parameters**. Three age groups (0-14, 15-64, 65+) mix by each country's
+contact matrix, rescaled so its dominant eigenvalue is one, which makes a season's basic reproduction
+number the realised R0 given that mixing rather than an artefact of the contact data's absolute scale.
+Each country-season is an independent epidemic, seeded on 1 August and integrated on a daily grid to a
+fixed 53-week horizon, with a single vaccination pulse into the 65+ group on 1 October.
+
+**What varies where is the model's central design**, and it is forced by the data rather than chosen
+for convenience. Observed ILI+ levels differ more than a hundredfold between countries and each country
+keeps its rank across seasons, so the level has to be a **country** property — a reporting proportion —
+not an epidemiological one. Seasons rise and fall **together** across Europe once that country level is
+divided out, which is what licenses one transmissibility and one visibility per season. So
+transmissibility `R0_s` is assumed to **vary between seasons and be the same across countries**;
+initial susceptibility `S0_c` to **vary between countries and be the same across that country's
+seasons**; and the elderly's relative susceptibility per contact is **assumed the same everywhere**,
+one number, because it is biology rather than surveillance.
+
+On the observation side the reporting proportion is assumed to **vary between countries** and, through
+two offsets, **between age groups within a country**, but to be **the same across that country's
+seasons** apart from one Europe-wide deviation per season **constrained to average zero**. The two
+constraints are not cosmetic: within a single country-season, transmissibility and susceptibility enter
+the rise rate as a **product**, and reporting level and season visibility enter the observation as a
+**product**, so each pair is exactly indistinguishable from one wave alone. Sharing `R0_s` across
+countries breaks the first tie and the average-one constraint breaks the second — **that is the reason
+this is a joint fit rather than 85 separate ones.** The seed size is left to **vary freely between
+country-seasons**: it is the model's only handle on when a wave arrives, and the observed peak spans 14
+weeks across the panel, so it cannot be shared.
+
+Observed counts are negative-binomial around the deterministic mean with a country-specific dispersion,
+which lets the **31% of observations that read exactly zero** carry their proper weight instead of being
+pushed through a Gaussian that would place a sixth of its mass below zero. The infectious period, the
+three vaccine effects and the vaccination timing are fixed from external estimates; no parameter is
+allowed to vary in more than one direction at a time.
+
+**What it delivers, and what it does not.** The fit converges in about 140 s, every parameter family
+contracts against its prior, and the publishable quantities recover from data simulated at a known
+truth. Two limits are measured rather than asserted: the deterministic mean needs about 2.6x more
+observation noise than the data's own week-to-week scatter can explain, so some of what the model calls
+measurement error is really misfit; and the country susceptibility **ranking is conditional on
+transmissibility genuinely being shared** — on simulated data where countries' true R0 differed by 10%
+that ranking fell from 0.97 to 0.09. Season-level conclusions survive that test; the country ranking
+does not.
 
 ## What was cut relative to the compartmental pilot, and why
 
@@ -195,6 +215,12 @@ replicates: roughly 1-2% per country-fit, and detectable rather than silent.
 `run_joint_recovery.R`, 18 full refits on the real 12-country design. Data simulated from the model
 itself at a known parameter set, then the whole pipeline refitted from scratch.
 
+**Measured on the 86-country-season design**, before the positivity-encoding exclusion removed CZ
+2024/2025. These are structural results about the estimator -- rank recovery, interval coverage, and
+whether a known driver effect survives the two-step procedure -- and one country-season out of 86 does
+not overturn them; but the numbers below have not been re-measured on the 85-cell design, and figure
+16 is not regenerated until `run_joint_recovery.R` is run again.
+
 **1. Truth at the fitted optimum, 8 replicates.** The publishable quantities come back:
 
 | quantity | rank recovery (Spearman) | 95% interval coverage |
@@ -263,7 +289,7 @@ now the top item on that list.
 **Residual defect.** In 1 of 8 replicates, 1 of 12 countries fell into the flat-line optimum
 (dispersion collapses, no wave fitted): roughly a 1-2% failure rate per country-fit. The multi-start
 of the local blocks reduced this from 1-in-11 but did not remove it. It is DETECTABLE rather than
-silent -- a flat-lined country is obvious in figure 03 and in the per-country correlations -- so
+silent -- a flat-lined country is obvious in figure 06 and in the per-country correlations -- so
 check for it on every real fit.
 
 ## Are the headline claims robust? (stress-tested 2026-09-14)

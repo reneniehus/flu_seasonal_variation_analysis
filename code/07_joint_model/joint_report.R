@@ -1,12 +1,14 @@
 # joint_report.R -- THE DEFAULT FIGURE SET for the joint model.
 #
-# The set is numbered and answers four questions in order, so a reader can walk it front to back:
-#   HOW THE MODEL WORKS       01 what varies where, 02 how a wave's arrival is set
-#   WHAT DATA IT FITS         03 every country-season, 04 one country by age, 05 the noise budget
-#   WHAT IT LEARNS            06 season transmissibility, 07 season visibility, 08 country
-#                             susceptibility, 09 reporting level, 10 age reporting, 11 attack rates
-#   WHETHER TO BELIEVE IT     12 data or prior, 13 recovery of a known truth
-# Every figure carries its own interpretation in the subtitle: what the parameter means, and what the
+# The set is numbered and answers five questions in order, so a reader can walk it front to back:
+#   WHAT DATA THERE IS        01 the panel, 02 the four features that dictate the model
+#   HOW THE MODEL WORKS       03 what each parameter does to a wave, 04 what varies where,
+#                             05 how a wave's arrival is set
+#   WHAT DATA IT FITS         06 every country-season, 07 one country by age, 08 the noise budget
+#   WHAT IT LEARNS            09 season transmissibility, 10 season visibility, 11 country
+#                             susceptibility, 12 reporting level, 13 age reporting, 14 attack rates
+#   WHETHER TO BELIEVE IT     15 data or prior, 16 recovery of a known truth
+# Every figure carries its own interpretation in the subtitle: what the quantity means, and what the
 # pattern in front of you is saying. They are meant to be readable without the code open.
 # save_jm_report() writes the whole set plus a MANIFEST.md listing them in this order.
 
@@ -39,9 +41,281 @@ suppressMessages({library(ggplot2); library(dplyr); library(tidyr)})
 .jm_ivnote = function(iv) if (is.null(iv)) "" else
   "\nBars are 95% intervals from the curvature of the fitted surface."
 
+# ================= WHAT DATA THERE IS =================
+#
+# The panel comes before the model in the set deliberately: every design choice the model makes is
+# forced by a feature of this data, and a reader who has seen the data first recognises each choice
+# instead of taking it on trust.
+
+# a tidy long frame of the OBSERVED series, pooled over age by population weight -- the same quantity
+# figure 09 plots the model against, but with no model in it
+.jm_obs = function(d){
+  do.call(rbind, lapply(seq_len(d$n_cs), function(i){
+    ic = d$cs_country[i] + 1L; N = d$N[[ic]]
+    per = d$rate_per / N
+    y = d$y[[i]]
+    data.frame(country = d$countries[ic], season = d$seasons[d$cs_season[i] + 1L],
+               week = seq_len(nrow(y)),
+               # population-weighted ILI+ per 100 000, i.e. sum(counts) / sum(population)
+               value = rowSums(sweep(y, 2, per, "*") * matrix(N / sum(N), nrow(y), length(N), byrow = TRUE)),
+               stringsAsFactors = FALSE)
+  }))
+}
+
+# ---- |-01 the panel: what data there is ----
+plot_jm_data_panel = function(fit){
+  d = fit$d
+  obs = .jm_obs(d)
+  cs = obs %>% group_by(country, season) %>%
+    summarise(weeks = sum(is.finite(value)), peak = suppressWarnings(max(value, na.rm = TRUE)),
+              .groups = "drop")
+  src = data.frame(country = d$countries[d$cs_country + 1L],
+                   season = d$seasons[d$cs_season + 1L],
+                   source = vapply(seq_len(d$n_cs), function(i)
+                     d$sources[[d$cs_country[i] + 1L]][d$cs_src[i] + 1L], character(1)),
+                   stringsAsFactors = FALSE)
+  cs = left_join(cs, src, by = c("country", "season"))
+  # every country x season the design COULD have had, so absent cells are visible as absent
+  grid = expand.grid(country = d$countries, season = d$seasons, stringsAsFactors = FALSE)
+  ex = d$excluded_ambiguous
+  exkey = if (!is.null(ex) && nrow(ex)) paste(ex$country, ex$season) else character(0)
+  g = left_join(grid, cs, by = c("country", "season")) %>%
+    mutate(season = factor(season, levels = d$seasons),
+           country = factor(country, levels = rev(d$countries)),
+           # an EXCLUDED cell is not an absent one: the country reported that season, we chose not to
+           # fit it. Showing both as blank would hide a decision behind a data gap.
+           state = ifelse(paste(country, season) %in% exkey, "excluded",
+                          ifelse(is.na(weeks), "no data", source)))
+  exd = if (length(exkey)) g %>% filter(state == "excluded") else NULL
+  ggplot(g, aes(season, country)) +
+    geom_tile(aes(fill = state), colour = "white", linewidth = 0.9) +
+    geom_text(aes(label = ifelse(is.na(weeks), "", as.character(weeks))), size = 2.9,
+              colour = "grey15") +
+    { if (!is.null(exd)) geom_point(data = exd, shape = 4, size = 6, stroke = 1.4,
+                                    colour = "#B02020") } +
+    scale_fill_manual(values = c(ERVISS = "#7FA8C9", RespiCompass = "#BFD8B0",
+                                 excluded = "#F2C9C9", `no data` = "grey93"),
+                      na.value = "grey93", name = NULL,
+                      breaks = c("ERVISS", "RespiCompass", "excluded", "no data"),
+                      labels = c("ERVISS", "RespiCompass", "excluded (see below)", "no data")) +
+    labs(title = "The panel: 85 country-seasons of weekly influenza-positive ILI",
+         subtitle = paste("One tile per country and season; the number is how many weeks carry an observation, and the",
+                          "colour which surveillance source that season came from. Blank means the country reported",
+                          "nothing usable that season. The red cross is the one country-season excluded because its",
+                          "influenza positivity cannot be computed for 14 weeks (see MODEL.md). Week counts differ",
+                          "because reporting stops at different points in the year -- which is why the attack rate is",
+                          "integrated to a fixed horizon rather than to the end of each series.", sep = "\n"),
+         caption = sprintf("%d countries x %d seasons; %d country-seasons fitted, %s observed age-week cells. RespiCompass covers up to 2023/24, ERVISS from 2024/25.",
+                           d$n_country, d$n_season, d$n_cs,
+                           format(sum(vapply(d$y, function(m) sum(is.finite(m)), numeric(1))), big.mark = ",")),
+         x = NULL, y = NULL) +
+    .jm_theme() + theme(panel.grid = element_blank(),
+                        axis.text.x = element_text(angle = 30, hjust = 1))
+}
+
+# ---- |-02 the four features of the data that dictate the model ----
+# Every one of the model's sharing choices is forced by one of these. Putting them in one figure is
+# the shortest honest answer to "why is the model built this way".
+plot_jm_data_features = function(fit){
+  d = fit$d
+  obs = .jm_obs(d)
+  pk = obs %>% group_by(country, season) %>%
+    summarise(peak = suppressWarnings(max(value, na.rm = TRUE)),
+              peak_week = week[which.max(replace(value, is.na(value), -Inf))], .groups = "drop") %>%
+    filter(is.finite(peak), peak > 0)
+
+  # (a) the between-country spread in observed level, and that it is a COUNTRY property
+  a = pk %>% mutate(country = reorder(country, peak, median))
+  pa = ggplot(a, aes(peak, country)) +
+    geom_line(aes(group = country), colour = "grey85", linewidth = 2.6) +
+    geom_point(colour = .jm_blue, size = 1.9, alpha = 0.85) +
+    scale_x_log10() +
+    labs(title = "1. Observed level is a COUNTRY property, not an epidemic one",
+         subtitle = paste0("Peak weekly ILI+ per 100 000, one point per season. The spread between countries is about ",
+                           sprintf("%.0f", max(a$peak) / min(a$peak)),
+                           "-fold\nand a country keeps its place across seasons, so it cannot be how many people were",
+                           " infected.\nIt is how many infections that country's surveillance SEES -> one reporting level per country."),
+         x = "peak ILI+ per 100 000 (log scale)", y = NULL)
+
+  # (b) seasons move TOGETHER across countries -> shared season parameters
+  b = pk %>% group_by(country) %>% mutate(rel = peak / median(peak)) %>% ungroup() %>%
+    mutate(season = factor(season, levels = d$seasons))
+  pb = ggplot(b, aes(season, rel)) +
+    geom_hline(yintercept = 1, linetype = "dashed", colour = "grey60") +
+    geom_line(aes(group = country), colour = "grey80", linewidth = 0.5) +
+    stat_summary(fun = median, geom = "line", aes(group = 1), colour = .jm_orange, linewidth = 1.6) +
+    stat_summary(fun = median, geom = "point", colour = .jm_orange, size = 2.6) +
+    scale_y_log10() +
+    labs(title = "2. Seasons rise and fall TOGETHER across Europe",
+         subtitle = paste("Each country's peak divided by its own median peak, so the country level is removed. Thin",
+                          "lines are countries, thick the median. They move in step -- a big season is big almost",
+                          "everywhere -- which is what licenses ONE transmissibility and ONE visibility per season", sep = "\n"),
+         x = NULL, y = "peak relative to that country's median")
+
+  # (c) a third of the observations are exactly zero -> negative binomial, not Gaussian
+  cnt = unlist(lapply(d$y, function(m) m[is.finite(m)]))
+  cz = data.frame(count = cnt) %>%
+    mutate(bin = cut(count, c(-1, 0, 1, 3, 10, 30, 100, 300, Inf),
+                     labels = c("0", "1", "2-3", "4-10", "11-30", "31-100", "101-300", ">300"))) %>%
+    count(bin)
+  cz$pct_lab = ifelse(cz$bin == "0", sprintf("%.0f%%", 100 * cz$n / sum(cz$n)), "")
+  pc = ggplot(cz, aes(bin, n)) +
+    geom_col(fill = .jm_green, width = 0.75) +
+    geom_text(aes(label = pct_lab), vjust = -0.5, size = 3.4, fontface = "bold", colour = .jm_green) +
+    labs(title = "3. A third of the observations are exactly zero",
+         subtitle = paste("Weekly influenza-positive consultations, all age groups and country-seasons pooled. A",
+                          "Gaussian around a small mean puts a sixth of its mass below zero and cannot represent",
+                          "this spike, so the observation model is negative-binomial on counts.", sep = "\n"),
+         x = "weekly count in one age group", y = "observations")
+
+  # (d) waves arrive at different times -> a free seed per country-season
+  pd = ggplot(pk, aes(peak_week)) +
+    geom_histogram(binwidth = 1, fill = .jm_blue, colour = "white", linewidth = 0.2) +
+    labs(title = "4. Waves arrive weeks apart, even in the same season",
+         subtitle = paste0("Week of the observed peak, counted from 1 August, over all ", nrow(pk),
+                           " country-seasons: a spread of ",
+                           diff(range(pk$peak_week)), " weeks.\nNothing else in the model can move a wave sideways",
+                           " without changing its shape, so the seed size\nis left free for every country-season."),
+         x = "week of the observed peak (from 1 August)", y = "country-seasons")
+
+  th = .jm_theme(9) + theme(plot.title = element_text(face = "bold", size = 11),
+                            plot.subtitle = element_text(size = 8, colour = "grey30", lineheight = 1.2))
+  patchwork::wrap_plots(pa + th, pb + th, pc + th, pd + th, ncol = 2) +
+    patchwork::plot_annotation(
+      title = "Four features of the data, and the model choice each one forces",
+      subtitle = "Read this before the model. Every sharing decision in the design answers one of these; none of them is a modelling preference.",
+      theme = theme(plot.title = element_text(face = "bold", size = 15),
+                    plot.subtitle = element_text(size = 10, colour = "grey30")))
+}
+
 # ================= HOW THE MODEL WORKS =================
 
-# ---- |-01 what varies where ----
+# ---- |-03 what each parameter DOES to a wave ----
+# The design table (figure 07) says where each parameter varies; this says what it MEANS, by showing
+# the curve the model actually produces when you move it. Every curve here comes from
+# jm_fitted_cpp at a perturbed parameter vector -- the real C++ model, not a redrawing of it -- so
+# the figure cannot drift from the thing it describes.
+#
+# The last panel is the point of the whole design: two pairs of curves that lie on top of each other.
+# Transmissibility and susceptibility enter the rise rate as a product, and reporting level and
+# season visibility enter the observation as a product, so within one country-season each pair is
+# indistinguishable. Sharing R0 across countries and constraining the visibilities to average one is
+# what breaks the two ties.
+plot_jm_mechanism = function(fit, ref = NULL){
+  d = fit$d; th = fit$theta; S = d$n_season
+  # a reference wave with a full grid and a clear peak, and NOT in the last season, whose visibility
+  # is the constrained one rather than a free slot
+  cand = which(d$cs_season < S - 1L & d$n_weeks >= 45)
+  if (!length(cand)) cand = which(d$cs_season < S - 1L)
+  pk = vapply(cand, function(i) suppressWarnings(max(d$y[[i]][, 2], na.rm = TRUE)), numeric(1))
+  i0 = if (is.null(ref)) cand[which.max(pk)] else ref
+  ic = d$cs_country[i0] + 1L; s_ix = d$cs_season[i0] + 1L
+  cc = d$countries[ic]; ss = d$seasons[s_ix]
+  base = d$off_country[ic]; nsrc = d$n_src[ic]
+  nm = jm_par_names(d)
+  # index of each slot we perturb
+  j = list(R0 = s_ix, delta = if (s_ix <= S - 1L) S + s_ix else NA_integer_,
+           S0 = base + 1L, c = base + 2L, off_eld = base + 4L, phi = base + 5L,
+           I0 = base + 5L + nsrc + d$cs_pos[i0] + 1L)
+  N = d$N[[ic]]; per = d$rate_per / N
+  mu_of = function(theta, grp = 2L){
+    m = jm_fitted_cpp(theta, d)$mu[[i0]]
+    data.frame(week = seq_len(nrow(m)), value = m[, grp] * per[grp])
+  }
+  bump = function(slot, by){ t2 = th; t2[slot] = t2[slot] + by; t2 }
+
+  # each panel: the reference curve plus one lower and one higher setting of a single parameter
+  panels = list(
+    list(key = "R0  transmissibility of the season", lo = bump(j$R0, log(0.93)), hi = bump(j$R0, log(1.07)),
+         lab = c("-7%", "+7%"),
+         note = "Steeper AND taller, and it peaks earlier. A 7% move is enough to double the peak, which is how little of this the data need to see."),
+    list(key = "S0  susceptibility of the country", lo = bump(j$S0, -0.25), hi = bump(j$S0, 0.25),
+         lab = c("lower", "higher"),
+         note = "Does the SAME thing as R0: the two enter the rise rate as a product. See the bottom panel."),
+    list(key = "I0  seed, i.e. when the wave arrives", lo = bump(j$I0, log(0.01)), hi = bump(j$I0, log(100)),
+         lab = c("/100", "x100"),
+         note = "Moves the wave sideways and changes nothing else. The only handle on timing."),
+    list(key = "c  reporting level of the country", lo = bump(j$c, log(0.6)), hi = bump(j$c, log(1.6)),
+         lab = c("-40%", "+60%"),
+         note = "Scales the whole curve. Same infections, more or fewer of them counted."),
+    list(key = "delta  visibility of the season", lo = bump(j$delta, log(0.6)), hi = bump(j$delta, log(1.6)),
+         lab = c("-40%", "+60%"),
+         note = "Also scales the curve -- but shared across countries, so it cannot absorb c."),
+    list(key = "off_eld  age reporting, 65+", lo = bump(j$off_eld, -1), hi = bump(j$off_eld, 1),
+         lab = c("half", "double"), grp = 3L,
+         note = "Scales ONE age group's curve only (65+ shown). Surveillance, not biology.")
+  )
+  # colour by DIRECTION, not by the label: every panel then reads the same way -- blue is the lower
+  # setting and orange the higher one, whatever the units of that particular parameter happen to be.
+  rows = do.call(rbind, lapply(panels, function(p){
+    g = if (is.null(p$grp)) 2L else p$grp
+    if (any(is.na(unlist(p[c("lo", "hi")])))) return(NULL)
+    rbind(cbind(mu_of(th, g),   dir = "as fitted", key = p$key),
+          cbind(mu_of(p$lo, g), dir = "lower",     key = p$key),
+          cbind(mu_of(p$hi, g), dir = "higher",    key = p$key))
+  }))
+  # wrap to the panel width, or the note runs off the right edge and the sentence is lost
+  notes = data.frame(key = vapply(panels, `[[`, character(1), "key"),
+                     note = vapply(panels, function(p)
+                       paste(strwrap(sprintf("%s  (%s / %s)", p$note, p$lab[1], p$lab[2]), width = 46),
+                             collapse = "\n"), character(1)),
+                     stringsAsFactors = FALSE)
+  rows$key = factor(rows$key, levels = notes$key)
+  notes$key = factor(notes$key, levels = notes$key)
+  notes$x = 1; notes$y = Inf
+  rows$dir = factor(rows$dir, levels = c("lower", "as fitted", "higher"))
+  pmain = ggplot(rows, aes(week, value, group = dir)) +
+    geom_line(data = rows %>% filter(dir != "as fitted"), aes(colour = dir), linewidth = 0.75) +
+    geom_line(data = rows %>% filter(dir == "as fitted"), colour = "grey25", linewidth = 1.3) +
+    geom_text(data = notes, aes(x = x, y = y, label = note), hjust = 0, vjust = 1.15,
+              size = 2.8, colour = "grey30", lineheight = 1.1, inherit.aes = FALSE) +
+    facet_wrap(~ key, scales = "free_y", ncol = 3) +
+    scale_colour_manual(values = c(lower = .jm_blue, higher = .jm_orange), name = NULL,
+                        labels = c(lower = "the lower setting", higher = "the higher setting")) +
+    scale_y_continuous(expand = expansion(mult = c(0.02, 0.55))) +
+    labs(x = "week of the season (from 1 August)",
+         y = sprintf("ILI+ per 100 000 (%s %s)", cc, ss)) +
+    .jm_theme(9) + theme(strip.text = element_text(face = "bold", size = 8.5),
+                         plot.margin = margin(4, 8, 4, 4))
+
+  # the two exact trade-offs, each drawn as a pair that coincides
+  stopifnot(!is.na(j$delta))
+  t_R0S0 = bump(j$R0, log(1.25))                   # +25% R0 ...
+  t_R0S0[j$S0] = qlogis(plogis(th[j$S0]) / 1.25)   # ... with S0 divided by 1.25: product held
+  t_cdel = bump(j$c, log(1.5)); t_cdel[j$delta] = th[j$delta] + log(1 / 1.5)
+  tr = rbind(cbind(mu_of(th),     set = "as fitted",                      pair = "R0 x S0 held constant"),
+             cbind(mu_of(t_R0S0), set = "R0 +25%, S0 /1.25",              pair = "R0 x S0 held constant"),
+             cbind(mu_of(th),     set = "as fitted",                      pair = "c x delta held constant"),
+             cbind(mu_of(t_cdel), set = "c +50%, visibility /1.5",        pair = "c x delta held constant"))
+  ptr = ggplot(tr %>% filter(value > 0.5), aes(week, value, colour = set, linetype = set)) +
+    geom_line(linewidth = 1.1) +
+    facet_wrap(~ pair, ncol = 2) +
+    scale_y_log10() +
+    scale_colour_manual(values = c("as fitted" = "grey30", "R0 +25%, S0 /1.25" = "#C1541E",
+                                   "c +50%, visibility /1.5" = "#C1541E"), name = NULL) +
+    scale_linetype_manual(values = c("as fitted" = "solid", "R0 +25%, S0 /1.25" = "22",
+                                     "c +50%, visibility /1.5" = "22"), name = NULL) +
+    labs(title = "Why the sharing in the design is not optional",
+         subtitle = paste("Each panel holds a PRODUCT fixed and moves both of its factors; log scale, so the rise is a",
+                          "straight line. RIGHT: reporting level and season visibility give exactly the same curve --",
+                          "they are the same number to the data. LEFT: transmissibility and susceptibility give the same",
+                          "RISE and separate only at the peak, because susceptibility also sets how many people there",
+                          "are left to infect. So one wave pins their product and almost nothing else -- which is why",
+                          "susceptibility needs transmissibility shared across countries before it means anything.", sep = "\n"),
+         x = "week of the season", y = "ILI+ per 100 000 (log scale)") +
+    .jm_theme(9) + theme(legend.position = "top")
+
+  patchwork::wrap_plots(pmain, ptr, ncol = 1, heights = c(2.1, 1)) +
+    patchwork::plot_annotation(
+      title = "What each parameter does to a wave",
+      subtitle = paste0("One country-season (", cc, " ", ss,
+                        "), adults unless stated. Grey is the fit; coloured lines move ONE parameter and leave the rest alone.",
+                        "\nEvery curve is produced by the model's own C++, so this figure cannot drift from the model it explains."),
+      theme = theme(plot.title = element_text(face = "bold", size = 15),
+                    plot.subtitle = element_text(size = 10, colour = "grey30", lineheight = 1.25)))
+}
+
+# ---- |-04 what varies where ----
 # The spec is a SEPARATE function so a test can hold it against the real layout: the `n` column must
 # add up to d$n_par exactly. It drifted once already -- the season-visibility row claimed one number
 # per season when the sum-to-zero constraint leaves only S-1 of them free -- and a figure that
@@ -403,48 +677,63 @@ plot_jm_recovery = function(rec, d, summ = NULL){
 save_jm_report = function(fit, id = NULL, iv = NULL, rec = NULL, dir = "output/joint_model"){
   dir.create(dir, showWarnings = FALSE, recursive = TRUE)
   # Omitting `iv` is legitimate -- a quick look without waiting minutes for the Hessian -- but it must
-  # be announced, because figures 06-10 then carry NO uncertainty and look no different for it. The
+  # be announced, because figures 09-13 then carry NO uncertainty and look no different for it. The
   # pipeline wrote the entire set that way for two days without anything saying so.
   if (is.null(iv))
-    warning("no intervals supplied: figures 06-10 will be written WITHOUT uncertainty bars. ",
+    warning("no intervals supplied: figures 09-13 will be written WITHOUT uncertainty bars. ",
             "Pass iv = jm_intervals(fit) for the publishable set.", call. = FALSE)
   d = fit$d; man = character(0)
   put = function(file, plot, w, h, what){
     ggsave(file.path(dir, file), plot, width = w, height = h, dpi = 115, limitsize = FALSE)
     man <<- c(man, sprintf("| `%s` | %s |", file, what))
   }
-  put("01_design_what_varies_where.png", plot_jm_design(fit), 12.5, 6.2, "how the model works: which parameters vary by season, by country, by age, and which are fixed")
-  put("02_arrival_time.png", plot_jm_arrival(fit), 10, 5.8, "how the model sets when each wave arrives (the seed)")
-  put("03_fit_overview.png", plot_jm_fit_overview(fit), 2.05 * d$n_season + 2, 1.35 * d$n_country + 2.8,
+  put("01_data_panel.png", plot_jm_data_panel(fit), 10.5, 6.6,
+      "what data there is: every country-season, its source, its observed weeks, and what was excluded")
+  put("02_data_features.png", plot_jm_data_features(fit), 14, 10.5,
+      "the four features of the data that dictate the model's design -- read before the model")
+  put("03_mechanism.png", plot_jm_mechanism(fit), 13, 11,
+      "how the model works: what each parameter does to a wave, and the two products the design has to break")
+  put("04_design_what_varies_where.png", plot_jm_design(fit), 12.5, 6.2,
+      "which parameters vary by season, by country, by age, and which are fixed")
+  put("05_arrival_time.png", plot_jm_arrival(fit), 10, 5.8,
+      "how the model sets when each wave arrives (the seed)")
+  put("06_fit_overview.png", plot_jm_fit_overview(fit), 2.05 * d$n_season + 2, 1.35 * d$n_country + 2.8,
       "what data it fits: every country-season, observed against modelled")
   for (cc in d$countries)
-    ggsave(file.path(dir, sprintf("04_fit_%s.png", cc)), plot_jm_fit_country(fit, cc),
+    ggsave(file.path(dir, sprintf("07_fit_%s.png", cc)), plot_jm_fit_country(fit, cc),
            width = 2.05 * d$n_season + 2, height = 7.2, dpi = 110, limitsize = FALSE)
-  man = c(man, sprintf("| `04_fit_<country>.png` | the same by age group, one file per country (%s) |",
+  man = c(man, sprintf("| `07_fit_<country>.png` | the same by age group, one file per country (%s) |",
                        paste(d$countries, collapse = ", ")))
-  put("05_noise_budget.png", plot_jm_adequacy(fit), 10, 5.8, "how well it fits, honestly: the noise the fit needed against the noise the data have")
-  put("06_season_R0.png", plot_jm_season_R0(fit, iv), 10, 6.0, "what it learns: transmissibility of each season's virus, shared across countries")
-  put("07_season_visibility.png", plot_jm_season_visibility(fit, iv), 10, 6.0, "what it learns: how visible each season was per infection, shared across countries")
-  put("08_country_S0.png", plot_jm_country_S0(fit, iv), 10, 6.0, "what it learns: susceptibility at the season start, by country")
-  put("09_country_reporting.png", plot_jm_country_reporting(fit, iv), 10, 5.6, "what it learns: fraction of adult infections that is counted, by country")
-  put("10_age_reporting.png", plot_jm_age_offsets(fit, iv), 10, 5.8, "what it learns: how visible children and the elderly are per infection, by country")
-  put("11_attack_rates.png", plot_jm_attack(fit), 10, 6.0, "what it learns: modelled attack rate by age group, the one reporting-free output")
-  if (!is.null(id)) put("12_data_or_prior.png", plot_jm_identifiability(id), 10, 5.4,
+  put("08_noise_budget.png", plot_jm_adequacy(fit), 10, 5.8,
+      "how well it fits, honestly: the noise the fit needed against the noise the data have")
+  put("09_season_R0.png", plot_jm_season_R0(fit, iv), 10, 6.0,
+      "what it learns: transmissibility of each season's virus, shared across countries")
+  put("10_season_visibility.png", plot_jm_season_visibility(fit, iv), 10, 6.0,
+      "what it learns: how visible each season was per infection, shared across countries")
+  put("11_country_S0.png", plot_jm_country_S0(fit, iv), 10, 6.4,
+      "what it learns: susceptibility at the season start, by country")
+  put("12_country_reporting.png", plot_jm_country_reporting(fit, iv), 10, 5.8,
+      "what it learns: fraction of adult infections that is counted, by country")
+  put("13_age_reporting.png", plot_jm_age_offsets(fit, iv), 10, 5.8,
+      "what it learns: how visible children and the elderly are per infection, by country")
+  put("14_attack_rates.png", plot_jm_attack(fit), 10, 6.0,
+      "what it learns: modelled attack rate by age group, the one reporting-free output")
+  if (!is.null(id)) put("15_data_or_prior.png", plot_jm_identifiability(id), 10, 5.4,
                         "whether to believe it: how much each parameter owes to the data rather than its prior")
-  # Figure 13 is normally written by run_joint_recovery.R, which is a separate (much longer) run. So
-  # when this function is called without `rec` an EXISTING 13 is left on disk untouched: list it
+  # Figure 16 is normally written by run_joint_recovery.R, which is a separate (much longer) run. So
+  # when this function is called without `rec` an EXISTING 16 is left on disk untouched: list it
   # anyway, with its date, rather than leaving a figure present but unmentioned and silently older
   # than the rest of the set.
-  f13 = file.path(dir, "13_recovery.png")
+  f16 = file.path(dir, "16_recovery.png")
   if (!is.null(rec)){
-    put("13_recovery.png", plot_jm_recovery(rec, d), 10, 7.0,
+    put("16_recovery.png", plot_jm_recovery(rec, d), 10, 7.0,
         "whether to believe it: recovery of a known truth simulated from the model onto the real design")
-  } else if (file.exists(f13)){
-    man = c(man, sprintf(paste0("| `13_recovery.png` | whether to believe it: recovery of a known truth. ",
+  } else if (file.exists(f16)){
+    man = c(man, sprintf(paste0("| `16_recovery.png` | whether to believe it: recovery of a known truth. ",
                                 "NOT regenerated by this run -- written by `run_joint_recovery.R`, last on %s |"),
-                         format(file.mtime(f13), "%Y-%m-%d %H:%M")))
+                         format(file.mtime(f16), "%Y-%m-%d %H:%M")))
   } else {
-    man = c(man, "| `13_recovery.png` | whether to believe it: recovery of a known truth. NOT YET RUN -- produce it with `Rscript code/07_joint_model/run_joint_recovery.R` |")
+    man = c(man, "| `16_recovery.png` | whether to believe it: recovery of a known truth. NOT YET RUN -- produce it with `Rscript code/07_joint_model/run_joint_recovery.R` |")
   }
   write.csv(jm_summary_season(fit), file.path(dir, "summary_season.csv"), row.names = FALSE)
   write.csv(jm_summary_country(fit), file.path(dir, "summary_country.csv"), row.names = FALSE)

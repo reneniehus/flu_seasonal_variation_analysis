@@ -308,7 +308,7 @@ test_that("jm_fit's reported flat check describes the theta it actually returns"
 # ---- the figures must describe the model they are drawn from ----
 # A figure is a claim. These two were wrong on disk before the checks below existed: the design
 # table counted one season visibility too many (the sum-to-zero constraint leaves S-1 free), and
-# figure 10's error bars were bound to a blocked name list while the plotting frame was interleaved
+# figure 13's error bars were bound to a blocked name list while the plotting frame was interleaved
 # by country, so 22 of 24 bars sat on the wrong parameter. Both are silent failures -- the figure
 # renders perfectly either way -- so they are held by a test rather than by inspection.
 test_that("the design figure's parameter counts add up to the model's actual parameter count", {
@@ -339,7 +339,7 @@ test_that("every figure's error bar is bound to the parameter it is drawn agains
   expect_equal(pick(paste0(d$countries, ":log_c"))$estimate, s$c_adult, tolerance = 1e-8)
   expect_equal(pick(paste0(d$countries, ":off_young"))$estimate, s$rel_young, tolerance = 1e-8)
   expect_equal(pick(paste0(d$countries, ":off_eld"))$estimate, s$rel_elderly, tolerance = 1e-8)
-  # figure 10 reshapes country x {young, elderly} into long form; the bars must follow the reshape
+  # figure 13 reshapes country x {young, elderly} into long form; the bars must follow the reshape
   age <- s[, c("country", "rel_young", "rel_elderly")]
   names(age) <- c("country", "young", "elderly")
   age <- tidyr::pivot_longer(age, c("young", "elderly"), names_to = "group", values_to = "rel")
@@ -356,7 +356,7 @@ test_that("the two other ordering-sensitive figures label their values correctly
   suppressMessages(source(here::here("code/07_joint_model/joint_report.R")))
   small <- jm_fit(d, max_sweeps = 2L, cores = 1, verbose = FALSE)
   nm <- jm_par_names(d); p <- jm_unpack(small$theta, d)
-  # figure 02 reads each country's seeds as a vector; the SEASON LABEL it draws them against comes
+  # figure 05 reads each country's seeds as a vector; the SEASON LABEL it draws them against comes
   # from cs_of_country, so the two orders have to agree. The names in theta are the ground truth.
   for (ic in seq_len(d$n_country)){
     ics <- d$cs_of_country[[ic]] + 1L
@@ -365,7 +365,7 @@ test_that("the two other ordering-sensitive figures label their values correctly
     expect_equal(log(unname(p$country[[ic]]$I0)), unname(small$theta[match(want, nm)]),
                  tolerance = 1e-9)
   }
-  # figure 04 flattens week x age matrices into a long frame; every series must still be the column
+  # figure 07 flattens week x age matrices into a long frame; every series must still be the column
   # it came from, for both the observed and the modelled layer
   tf <- jm_tidy_fit(small); f <- jm_fitted_cpp(small$theta, d)
   expect_equal(nrow(tf), 2L * sum(d$n_weeks) * length(d$groups))
@@ -448,6 +448,11 @@ test_that("every figure in the default set actually renders", {
   small <- jm_fit(d, max_sweeps = 2L, cores = 1, verbose = FALSE)
   iv <- jm_intervals(small); id <- NULL
   build <- function(p) expect_s3_class(ggplot2::ggplot_build(p), "ggplot_built")
+  # the data-overview and mechanism figures. The mechanism figure computes its curves from the model's
+  # own C++ at perturbed parameter vectors, so it cannot drift from the model -- but it does index
+  # specific parameter slots, so a layout change must fail here rather than mislabel a panel.
+  bp <- function(p) expect_s3_class(patchwork::patchworkGrob(p), "gtable")
+  build(plot_jm_data_panel(small)); bp(plot_jm_data_features(small)); bp(plot_jm_mechanism(small))
   # with intervals, which is how the report is written
   build(plot_jm_design(small)); build(plot_jm_arrival(small))
   build(plot_jm_fit_overview(small)); build(plot_jm_fit_country(small, d$countries[1]))
@@ -502,14 +507,16 @@ test_that("the default design is the documented one, and the attack rate is a se
   expect_gte(dd$attack_weeks, max(dd$n_weeks))
   expect_true(any(dd$n_weeks < dd$attack_weeks))
   # THE GUARANTEE: running the dynamics past the observation window must not touch the likelihood.
-  # Checked on the 86-cell design, because the cached fit's theta belongs to that layout.
+  # Checked on whichever design the cached fit's theta actually belongs to -- the shipped fit uses the
+  # exclusion, but the check is meaningful on either, so pick by length rather than assuming.
   skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
   fit0 <- readRDS(here::here("output/joint_model/joint_fit.rds"))$fit
-  skip_if_not(length(fit0$theta) == full$n_par, "cached fit predates this layout")
-  d_short <- full; d_short$attack_weeks <- 0L    # the old behaviour
-  expect_equal(jm_negll_cpp(fit0$theta, full), jm_negll_cpp(fit0$theta, d_short), tolerance = 1e-12)
+  dref <- if (length(fit0$theta) == dd$n_par) dd else full
+  skip_if_not(length(fit0$theta) == dref$n_par, "cached fit predates both layouts")
+  d_short <- dref; d_short$attack_weeks <- 0L    # the old behaviour
+  expect_equal(jm_negll_cpp(fit0$theta, dref), jm_negll_cpp(fit0$theta, d_short), tolerance = 1e-12)
   # ... but it does change the attack rate, which is the point
-  a_season <- jm_fitted_cpp(fit0$theta, full)$attack
+  a_season <- jm_fitted_cpp(fit0$theta, dref)$attack
   a_window <- jm_fitted_cpp(fit0$theta, d_short)$attack
   expect_gt(max(abs(a_season - a_window) / a_window), 0.05)
   expect_true(all(a_season >= a_window - 1e-12))  # a longer horizon can only add infections
@@ -534,7 +541,7 @@ test_that("an unresolved season or source label fails in R instead of aborting i
 test_that("the two settings files cannot silently disagree about the rate basis", {
   # FINDING: d$y is built with comp_model_settings() while d$rate_per is stored from jm_settings().
   # They agreed only by coincidence; a change to one alone would put the counts on one basis and
-  # every per-100k conversion on another (figure 03 out by 10x, every baseline b silently rescaled).
+  # every per-100k conversion on another (figure 06 out by 10x, every baseline b silently rescaled).
   expect_equal(jm_settings()$rate_per, comp_model_settings()$rate_per)
   bad <- modifyList(jm_settings(), list(rate_per = 1e6))
   expect_error(withr::with_dir(here::here(),

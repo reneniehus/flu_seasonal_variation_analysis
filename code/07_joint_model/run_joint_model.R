@@ -67,7 +67,7 @@ dir.create("output/joint_model", showWarnings = FALSE, recursive = TRUE)
 saveRDS(list(fit = fit, id = id, adequacy = ad, intervals = iv, compile_seconds = t_compile),
         "output/joint_model/joint_fit.rds")
 cat("\n--- figures ---\n")
-# `iv` MUST be passed: without it figures 06-10 are drawn with no uncertainty at all, and the whole
+# `iv` MUST be passed: without it figures 09-13 are drawn with no uncertainty at all, and the whole
 # set was written that way until 2026-09-14 -- silently, because a figure with no error bars renders
 # as cleanly as one with them. save_jm_report now warns when iv is missing, and a test asserts this
 # call still includes it.
