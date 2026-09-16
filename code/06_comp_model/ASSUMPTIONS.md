@@ -220,9 +220,11 @@ assumptions of the previous Stan model except where the owner has explicitly cha
   symptomaticity (shared), care-seeking/testing that year (local, now absorbed elsewhere or into
   phi) and season size the mechanism cannot produce. Country-season misfit therefore lands in phi,
   S0_c or R0_s and must be watched (Estonia is the known outlier). Per-country fits keep it free
-  per season as the warm start and the sharing diagnostic. The baseline `b` is PER SOURCE (`b_by_source`): RespiCompass
-  ILI+ is exactly zero in weeks without detections (24-52 zeros per pre-COVID season in DK) while the
-  ERVISS reconstruction has a positive floor, and one shared b forced phi towards 1.
+  per season as the warm start and the sharing diagnostic. The baseline `b` is PER SOURCE
+  (`b_by_source`) because one shared `b` forced phi towards 1 (measured). **Corrected 2026-09-16:**
+  the reason first given for it -- that RespiCompass is exactly zero where the ERVISS reconstruction
+  has a positive floor -- is contradicted by the data (see F3), so `b` is a coverage-era nuisance
+  parameter, not a source property.
 - F3 `[stan][proposal]` Scale: ILI+ rates per 100 000 of the age group are converted to COUNTS via
   `rate * pop_a / 1e5` -- with EACH age group's own population (the legacy `make_stan_list()` indexed
   `pop_age_group[1,]`, i.e. scaled every age group by the 0-4 population; a bug, not replicated) --
@@ -341,9 +343,19 @@ the source alignment).
 - `b` (F2) -- the off-season BASELINE of the observed series: ILI+ per 100 000 that is NOT influenza
   infections in the model's sense (residual positivity in ILI from other causes, misclassification,
   the reconstruction floor of the stitched series). There is one `b` per DATA SOURCE (`b_RespiCompass`,
-  `b_ERVISS`) because the two sources have different floors: RespiCompass ILI+ is exactly zero in
-  weeks without detections, the ERVISS reconstruction sits on a small positive floor -- one shared
-  `b` cannot be right for both and the mismatch was absorbed by phi.
+  `b_ERVISS`) because one shared `b` could not serve both and the mismatch was absorbed by phi.
+  **Corrected 2026-09-16.** The stated reason was that RespiCompass ILI+ is exactly zero in weeks
+  without detections while the ERVISS reconstruction sits on a small positive floor. Measured on the
+  2023/2024 overlap, where both sources give a finite value for the same country-week (357 weeks over
+  the 12 design countries): RespiCompass zero with ERVISS positive **0 times**, the reverse **0
+  times**, both exactly zero 112 times. Where both are observable they agree about zeros week for
+  week. What differs is the WEEK WINDOW each source covers per country -- pre-COVID RespiCompass
+  series stop around week 36-42 while ERVISS-era series run to week 52-53 -- so one baseline would be
+  fitted largely to the wave and the other largely to the off-season. The fitted gap between the two
+  (up to 392x for BE) therefore measures coverage, not a source property. Two consequences to carry:
+  read `b` as a coverage-era nuisance parameter; and because the panel stitches PER WEEK, 8 of the 86
+  fitted country-seasons take 3-14 weeks from the other source while labelled with one, mostly in the
+  late off-season tail, so those weeks are scored against the wrong baseline.
 - `phi` (F3) -- OBSERVATION (measurement) noise: the overdispersion of the weekly ILI+ around the
   model's expected value, `Var = mu + mu^2/phi`, so 1/sqrt(phi) is the coefficient of variation at
   large counts (phi = 4 means +/- 50%). Mechanistically it is everything that scrambles the

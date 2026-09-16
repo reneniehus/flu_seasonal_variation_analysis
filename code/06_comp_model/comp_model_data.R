@@ -20,22 +20,32 @@
 }
 
 # ---- |-65+ coverage per season with provenance ----
-.cm_vax_coverage = function(country, seasons, models_in, ext_path = "data/external/vaccination_coverage_65plus_postcovid.csv"){
+.cm_vax_coverage = function(country, seasons, models_in,
+                            ext_path = here::here("data/external/vaccination_coverage_65plus_postcovid.csv")){
   L = models_in$data_timeseries_long; cc = country                # cc: the external CSV has a 'country' COLUMN that would mask the argument
   hist = L %>% filter(stream == "vaccination_history_65plus", observed, country_short == cc) %>%
     distinct(season, value) %>% deframe()
+  # An ABSENT external file must fall through to the next rung of the documented ladder, not kill the
+  # call. `else c()` made ext NULL, so ext[s] was NULL, is.na(NULL) was logical(0), and the `else if`
+  # below failed with "argument is of length zero" -- for every country, turning a documented
+  # four-step fallback into a hard stop. The path is absolute now too, so it no longer depends on the
+  # working directory being the repo root.
   ext = if (file.exists(ext_path)) read.csv(ext_path, stringsAsFactors = FALSE) %>%
     filter(country_short == cc, !grepl("of invited", age_band)) %>% distinct(season, coverage_pct) %>%
-    mutate(cov = coverage_pct / 100) %>% select(season, cov) %>% deframe() else c()
+    mutate(cov = coverage_pct / 100) %>% select(season, cov) %>% deframe()
+    else setNames(numeric(0), character(0))
   scen = L %>% filter(stream == "vaccination_scenario", observed, country_short == cc,
                       scenario %in% c("higher_vax_coverage", "lower_vax_coverage")) %>% pull(value)
   scen_mid = if (length(scen)) mean(scen) else NA_real_
+  # a name lookup that is safe on an EMPTY vector: v[s] on a zero-length vector is NA, but on NULL it
+  # is NULL, and the ladder below needs a length-1 logical at every rung
+  has = function(v, s) length(v) > 0 && s %in% names(v) && is.finite(v[[s]])
   out = data.frame(season = seasons, coverage = NA_real_, provenance = NA_character_, stringsAsFactors = FALSE)
   last = NA_real_
   for (i in seq_along(seasons)){
     s = seasons[i]
-    if (!is.na(hist[s]))      { out$coverage[i] = hist[[s]];  out$provenance[i] = "observed history" }
-    else if (!is.na(ext[s]))  { out$coverage[i] = ext[[s]];   out$provenance[i] = "data/external post-COVID" }
+    if (has(hist, s))         { out$coverage[i] = hist[[s]];  out$provenance[i] = "observed history" }
+    else if (has(ext, s))     { out$coverage[i] = ext[[s]];   out$provenance[i] = "data/external post-COVID" }
     else if (is.finite(scen_mid)) { out$coverage[i] = scen_mid; out$provenance[i] = "RespiCompass scenario midpoint" }
     else if (is.finite(last)) { out$coverage[i] = last;       out$provenance[i] = "carried forward" }
     else                      { out$coverage[i] = 0;          out$provenance[i] = "none available -> 0" }
@@ -46,7 +56,8 @@
 
 # ---- |-the country's model data ----
 build_comp_data = function(country, models_in, demo, settings,
-                           panel = read.csv("data/slim_flu_iliplus.csv", stringsAsFactors = FALSE)){
+                           panel = read.csv(here::here("data/slim_flu_iliplus.csv"),
+                                            stringsAsFactors = FALSE)){
   country_long = EU_long(country)
   N = .cm_populations(demo$population_pyramid_fine, country_long)
   N4 = demo$population_pyramid %>% filter(country == country_long) %>%

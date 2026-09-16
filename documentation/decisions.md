@@ -377,9 +377,13 @@ variant stays reproducible; the defaults now follow the evidence and await the o
   likelihood keeps R0_s within 1.44-1.60. A season deviation on reporting absorbs the size differences
   (89 nats; 0.5-1.7x). Consequence for the joint stage: season size may need a Europe-wide severity
   factor alongside R0_s.
-- **Baseline per data source.** RespiCompass ILI+ is exactly zero before the wave (24-52 zeros per
-  pre-COVID season in DK); the ERVISS reconstruction has a positive floor; one shared baseline forced
-  phi towards 1.
+- **Baseline per data source.** One shared baseline forced phi towards 1, which is the measured reason
+  to split it. **The reason first recorded here was wrong (corrected 2026-09-16):** it said RespiCompass
+  ILI+ is exactly zero before the wave while the ERVISS reconstruction has a positive floor. Where both
+  sources are observable (357 country-weeks of the 2023/2024 overlap, 12 design countries) RespiCompass
+  is zero with ERVISS positive 0 times and the reverse 0 times; they are zero together 112 times. The
+  difference is which WEEKS each source covers, so `b` is a coverage-era nuisance parameter and the
+  fitted gap between the two slots (up to 392x) measures coverage rather than a surveillance property.
 - **EKF design.** Estimating q let the filter carry the wave (q -> 0.3-0.6) and the mechanistic
   parameters wandered; a seed-scaled initial covariance was exploited the same way (the EKF objective
   preferred a degenerate baseline-plus-noise mode, 6564 vs 9100). Decisions: two-stage fitting
@@ -650,3 +654,86 @@ episodic misfit.
 where a covariate really moves the season parameters by a known amount, and `jm_driver_recovery` runs the
 fit-then-regress step and checks the slope comes back. Any driver association found in real data can
 therefore be told apart from one manufactured by the procedure, before it is ever claimed.
+
+## 2026-09-16 -- the data layer audited, and what it means for reading the output
+
+The model code had been audited from six angles; the DATA LAYER under it never had. A fan-out audit got
+through two dimensions before the compute budget ran out, and every one of its independent verifiers
+died with it, so the findings below were re-verified by hand before being acted on.
+
+**The reassuring half, and it is the larger half.** All 86 country-season observation matrices rebuild
+EXACTLY from the raw streams by independent code (max count difference 0, max rate difference 2e-16);
+the three age bands map from the four source bands with none dropped or double-counted; the populations
+used for the band merge and for the count conversion agree to the person and sum to the national total;
+missing cells are genuinely NA and the likelihood skips exactly those; `lgamma_y1` sums over exactly
+the cells the C++ skips; season boundaries are the documented 1 August with no ISO-week straddle; the
+committed panel reproduces the live stitch exactly; and the whole data object is reproducible field for
+field. 37 such checks came back clean. **The data object is what it says it is.**
+
+**What was wrong, and is now fixed.**
+
+1. **`jm_build_data`'s `min_seasons` default was still 6**, the value the 2026-09-12 decision replaced
+   with 5. Only the runner passed the override, so any other caller reproducing "the model" as the
+   documents describe it silently got an 11-country / 81-country-season / **173**-parameter design
+   instead of 12 / 86 / **184** -- announced by one line of verbose output. The shipped fit was never
+   affected (the 5-season design is field-for-field identical to the cached `d`); the DEFAULT was
+   stale. Now 5, with a test pinning 12 / 86 / 184 for the real candidate list. No small test design
+   exercised the default, which is why nothing caught it.
+2. **The attack rate was a window quantity reported as a season quantity.** `n_weeks` doubled as the
+   integration horizon, so each country-season's epidemic was integrated only as far as that country's
+   surveillance series happened to run (33 to 53 weeks). Five of 86 cells moved by more than 5% and
+   IT 2015/2016 by **15%** (window 38 weeks) purely from data availability -- in a quantity figure 11
+   calls reporting-free and invites comparison with cohort evidence. The dynamics now run to a fixed
+   53-week horizon everywhere while only the observed weeks feed the likelihood, so the negative
+   log-likelihood is unchanged to the last bit (verified) and the attack rate is comparable across
+   cells. The flat-line reference minimum moves from 0.27 to 0.30; the 0.03 threshold is unaffected.
+3. **An unresolved season or source label would have killed the R process.** `cs_season` and `cs_src`
+   come from `match() - 1L`, and `srcs` is built with `sort(unique(...))` which DROPS NA -- so one
+   unmatched source label yields `NA_integer_`, which the C++ uses as a raw index (`logb[INT_MIN]`).
+   The process dies with "an irrecoverable exception occurred", losing the fit and reporting nothing
+   about the cause. Unreachable from the committed panel, so this guards a future panel build. Now a
+   `stopifnot` in R with a message naming the offending vector.
+4. **The two settings files could silently disagree about the rate basis.** `d$y` is built with
+   `comp_model_settings()` while `d$rate_per` is stored from `jm_settings()`; they agreed only by
+   coincidence. Passing `rate_per = 1e6` to `jm_settings()` left the counts unchanged but made every
+   per-100k conversion 10x too large and silently rescaled every fitted baseline. Now an assertion.
+5. **The documented vaccination fallback did not exist.** `ext = ... else c()` made `ext` NULL, so
+   `is.na(ext[s])` was `logical(0)` and the four-step ladder raised "argument is of length zero" for
+   every country whenever the external CSV was absent -- which also fires from any working directory
+   but the repo root. Both paths are `here::here()` now and the ladder degrades as documented. And
+   `jm_build_data` reported every failure as "(no data)", the one explanation it cannot be; it now
+   prints the caught message.
+6. **The rationale for `b` per source was contradicted by the data.** See the corrected entry above.
+
+**What is a caveat rather than a bug, and now travels with the output.**
+
+- **`2025/2026` rests on 7 of 12 countries**, on 34-41-week grids against 52-53 elsewhere, with 774
+  observed cells against 1497 for 2023/2024 -- and it carries the HIGHEST fitted `R0` (1.71). The
+  sum-to-zero constraint on the season deviations treats it as one of eight equals.
+  `jm_summary_season` now reports `n_country`, `obs_cells` and the grid range next to `R0`.
+- **Norway is fitted on the EU-average contact matrix** (it has none of its own). Its age offsets are
+  the parameters most sensitive to the mixing pattern -- re-optimising its block under neighbours'
+  matrices moves the elderly offset by up to 66% for a likelihood spread of 0.7 nats -- and its
+  `rel_young` of 0.385 is the most extreme value in the country table. `d$contact_source` and
+  `summary_country.csv` now name each country's matrix.
+- **8 of 86 country-seasons take 3-14 weeks from the other source** while labelled with one, mostly in
+  the late off-season tail where the baseline is essentially the whole model mean. The stitch documents
+  the per-week rule; the consequence for `b` is now documented too.
+- **The twelve countries are a deliberate selection.** Iceland, Malta and Austria meet the design's own
+  inclusion rule and were never offered to it. Since sharing `R0_s` across the design's countries is
+  what identifies `S0_c`, membership is substantive.
+
+**Open, needing an owner decision.** The raw ERVISS file encodes a zero-detection week two ways: 2083
+weeks say `detections = 0` explicitly, and 271 weeks report `tests > 0` with the detections row simply
+absent. The code reads the first as an observed zero and the second as missing, and because the panel's
+grid ends at the last finite week, a run of such weeks at the end of a season SHORTENS it rather than
+leaving holes. This costs 110 panel weeks, 18 inside fitted country-seasons, and truncates CZ 2024/2025
+at week 36 -- so CZ's `b_ERVISS` is reported as an off-season floor estimated from a series with no
+off-season. **Is an omitted detections row zero detections, or unknown?** Reading it as zero recovers
+the weeks; keeping it missing needs the grid to stop shortening silently and the dropped count reported
+per country-season. Not decided unilaterally because it changes what the model is fitted to.
+
+**Still un-audited** (the fan-out died before reaching them): the settings and priors against the
+documents, the vaccination pulse and contact-matrix mechanics inside the C++, the Euler integrator's
+accuracy and edge behaviour, the internals of the identifiability and adequacy diagnostics, the
+starting values, and end-to-end reproducibility and determinism.

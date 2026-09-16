@@ -84,9 +84,16 @@ comp_model_settings = function(){
   p$c_by_season     = TRUE        # [proposal, pending owner] evidence: DK stage-1 fit 89 nats better; deviations 0.5-1.7x track the big/small seasons
   p$prior_logc_season_sd = 0.5    # [proposal] a factor ~2.7 at 2 sd
   p$rate_per        = 1e5         # [stan]  ILI+ rates are per 100 000 of the age group; counts = rate * pop / 1e5 (F3)
-  # Off-season baseline b PER DATA SOURCE: RespiCompass ILI+ is exactly 0 in weeks without flu detections,
-  # ERVISS-era reconstructions sit at a positive floor; one shared b cannot be both (the Danish fit forced
-  # phi ~ 1 to make hundreds of exact zeros plausible under a ~100-count baseline).
+  # Off-season baseline b PER DATA SOURCE. The EFFECT is real and measured: one shared b forced the
+  # Danish phi towards 1 to make hundreds of exact zeros plausible under a ~100-count baseline.
+  # The REASON originally given for it was not. It said RespiCompass ILI+ is exactly zero in weeks
+  # without detections while the ERVISS reconstruction sits on a positive floor -- but where both
+  # sources are observable (357 country-weeks of the 2023/2024 overlap) there is not ONE week in which
+  # RespiCompass is zero and ERVISS positive, nor one the other way; they are zero together 112 times.
+  # What actually differs is WHICH WEEKS each source covers per country: pre-COVID RespiCompass series
+  # stop around week 36-42 while ERVISS-era series run to 52-53, so one baseline would be fitted to the
+  # wave and the other to the off-season. Read b as a COVERAGE-ERA NUISANCE PARAMETER, not as a
+  # property of a surveillance system (measured 2026-09-16).
   p$b_by_source     = TRUE        # [proposal] log_b per source (RespiCompass, ERVISS) instead of one b
   p$use_cum_burden_term = FALSE   # [owner] no separate cumulative-burden likelihood, no likelihood weights (F4)
   p$obs_weights     = NULL        # [owner] weight_obs_epi dropped (F4)

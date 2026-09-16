@@ -54,7 +54,19 @@ jm_load_cpp = function(dir = "output/joint_model/cpp_cache"){
 # collapse of the contact matrix, the populations and the 65+ coverage are already settled there.
 # Counts are ROUNDED here: the panel holds rates, the count scale is a device (MODEL.md), and the
 # negative binomial wants integers.
-jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_seasons = 6L, verbose = TRUE){
+# min_seasons = 5L is the OWNER'S DECISION of 2026-09-12 ("5 keeps Spain in"), which is what gives the
+# documented design of 12 countries / 86 country-seasons / 184 parameters. It was left at 6 here while
+# only run_joint_model.R passed the override, so any other caller reproducing "the model" as the
+# documents describe it silently got an 11-country / 81 / 173 design instead, announced by one buried
+# line of verbose output. The default now IS the decision, and a test pins the resulting design.
+jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_seasons = 5L, verbose = TRUE){
+  # The data layer is configured by comp_model_settings() (line below) while `set` supplies the same
+  # two constants to the fitted object. They agree today only by coincidence -- nothing tied them --
+  # so a change to either file alone would silently put d$y on one basis and d$rate_per on another.
+  cms = comp_model_settings()
+  if (!isTRUE(all.equal(set$rate_per, cms$rate_per)))
+    stop(sprintf("rate_per disagrees between jm_settings() (%g) and comp_model_settings() (%g); d$y is built with the latter, so the two must match",
+                 set$rate_per, cms$rate_per))
   if (anyDuplicated(countries)){                     # cds[[cc]] assigns by NAME, so a repeated code
     dup = unique(countries[duplicated(countries)])   # would overwrite and the design silently shrink
     if (verbose) cat("  dropping duplicate country code(s):", paste(dup, collapse = ", "), "\n")
@@ -62,7 +74,11 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
   }
   cds = list()
   for (cc in countries){
-    cd = tryCatch(build_comp_data(cc, models_in, demo, comp_model_settings()), error = function(e) NULL)
+    # Report WHY a country was dropped. "(no data)" was printed for every failure mode, including the
+    # ones it cannot be -- a missing external CSV, a bad working directory, an unknown country code --
+    # so a country with a full panel could vanish from the design while the log blamed its data.
+    cd = tryCatch(build_comp_data(cc, models_in, demo, cms), error = function(e) conditionMessage(e))
+    if (is.character(cd)){ if (verbose) cat("  skip", cc, "-- build_comp_data failed:", cd, "\n"); next }
     if (is.null(cd)){ if (verbose) cat("  skip", cc, "(no data)\n"); next }
     # PRUNE unusable seasons before anything counts them. A season with no finite observation
     # contributes nothing to the likelihood but would still claim a seed slot that no country-season
@@ -115,10 +131,31 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
   }
   cs_of_country = lapply(seq_along(cds), function(ic) as.integer(which(cs_country == ic - 1L) - 1L))
 
+  # FAIL LOUDLY IN R RATHER THAN ABORT IN C++. cs_season and cs_src come from match() - 1L, which
+  # yields NA_integer_ for a label it cannot find -- and srcs is built with sort(unique(...)), which
+  # DROPS NA, so a single unresolved source label produces exactly that. The C++ uses these as raw
+  # indices (logb[cs_src[i]], sh.R0[cs_season[i]]), so NA_INTEGER = INT_MIN reads far out of bounds and
+  # the R process dies with "an irrecoverable exception occurred", taking the whole fit with it and
+  # reporting nothing about the cause. Unreachable from the committed panel (its source column has no
+  # NA), so this guards a future panel build rather than today's.
+  bad = c(cs_country = anyNA(cs_country), cs_season = anyNA(cs_season), cs_src = anyNA(cs_src),
+          cs_pos = anyNA(cs_pos), vax_eld = anyNA(vax_eld), lgamma_y1 = anyNA(lgamma_y1))
+  if (any(bad))
+    stop("unresolved label(s) in the assembled design: ", paste(names(bad)[bad], collapse = ", "),
+         ". A country-season carries a season or source label that is not in the design's own list; ",
+         "fix the panel rather than fitting, because the C++ would read these as out-of-range indices.")
+
   d = c(list(
     n_country = C, n_season = S, n_cs = length(y), n_par = n_par,
     countries = names(cds), seasons = seasons_all, sources = srcs,
     Cn = lapply(cds, `[[`, "Cn"), N = lapply(cds, `[[`, "N"), groups = cds[[1]]$groups,
+    # PROVENANCE OF THE MIXING PATTERN. build_comp_data records whether a country uses its own
+    # Prem-derived contact matrix or the EU average; that was being discarded here, so nothing
+    # downstream could disclose it. Norway has no matrix of its own and gets the EU average, which
+    # matters because the age reporting offsets are the parameters most sensitive to the mixing
+    # pattern (MODEL.md).
+    contact_source = vapply(cds, function(cd)
+      if (is.null(cd$contact_source)) NA_character_ else as.character(cd$contact_source), character(1)),
     n_src = as.integer(n_src), n_cs_of_country = as.integer(n_cs_of_country),
     n_local = as.integer(n_local), off_country = off_country,
     cs_of_country = cs_of_country, cs_country = cs_country, cs_season = cs_season,
@@ -126,7 +163,13 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
     vax_eld = vax_eld, lgamma_y1 = lgamma_y1, y = y,
     rates = unlist(lapply(cds, `[[`, "rates"), recursive = FALSE),
     gamma = set$gamma_per_day, ve_inf = set$ve_inf, ve_ili = set$ve_ili,
-    ve_spread = set$ve_spread, rate_per = set$rate_per, vax_day = set$vax_day
+    ve_spread = set$ve_spread, rate_per = set$rate_per, vax_day = set$vax_day,
+    # The DYNAMICS horizon, distinct from the observation windows. Each country-season is observed for
+    # however long its surveillance series runs (33 to 53 weeks here), but the attack rate has to mean
+    # the same thing in every cell to be comparable across them and against cohort evidence, so the
+    # epidemic is integrated to a full season everywhere. Only the observed weeks enter the
+    # likelihood, so this changes no fitted value -- see simulate_season in the C++.
+    attack_weeks = max(53L, max(as.integer(n_weeks)))
   ), set[grep("^pr_", names(set))])
   if (verbose) cat(sprintf("%d countries, %d seasons, %d country-seasons, %d parameters (%d shared, %d local)\n",
                            C, S, length(y), n_par, n_shared, sum(n_local)))
@@ -501,12 +544,30 @@ jm_summary_country = function(fit){
              rel_young = 2^vapply(p$country, `[[`, numeric(1), "off_young"),
              rel_elderly = 2^vapply(p$country, `[[`, numeric(1), "off_eld"),
              phi = vapply(p$country, `[[`, numeric(1), "phi"),
-             n_seasons = d$n_cs_of_country, row.names = NULL)
+             n_seasons = d$n_cs_of_country,
+             # whose mixing pattern this country's age offsets were fitted under: a country on the EU
+             # average has no contact matrix of its own, and the offsets are the parameters most
+             # sensitive to it, so the provenance travels with the number it qualifies
+             contact = if (is.null(d$contact_source)) NA_character_ else unname(d$contact_source),
+             row.names = NULL)
 }
+# A season-level number must never be read without its sample size. Season support is markedly
+# uneven -- the last season rests on 7 of 12 countries and roughly half the weekly cells of the
+# richest -- and it carries the highest fitted R0, so n_country and obs_cells belong in the same
+# table as R0 rather than in a caveat somewhere else.
 jm_summary_season = function(fit){
-  p = jm_unpack(fit$theta, fit$d)
-  data.frame(season = fit$d$seasons, R0 = unname(p$R0), deviation = unname(p$delta),
-             reporting_mult = exp(unname(p$delta)), row.names = NULL)
+  d = fit$d; p = jm_unpack(fit$theta, d)
+  per = function(s, f) { ii = which(d$cs_season == s - 1L); f(ii) }
+  data.frame(season = d$seasons, R0 = unname(p$R0), deviation = unname(p$delta),
+             reporting_mult = exp(unname(p$delta)),
+             n_country = vapply(seq_len(d$n_season), function(s) per(s, length), integer(1)),
+             obs_cells = vapply(seq_len(d$n_season), function(s)
+               per(s, function(ii) sum(vapply(ii, function(i) sum(is.finite(d$y[[i]])), numeric(1)))), numeric(1)),
+             last_week_min = vapply(seq_len(d$n_season), function(s)
+               per(s, function(ii) min(d$n_weeks[ii])), integer(1)),
+             last_week_max = vapply(seq_len(d$n_season), function(s)
+               per(s, function(ii) max(d$n_weeks[ii])), integer(1)),
+             row.names = NULL)
 }
 
 # ---- |-base-R reference implementation of the SAME model, for the identity test ----

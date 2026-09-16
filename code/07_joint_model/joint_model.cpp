@@ -57,7 +57,17 @@ static inline double spectral_radius3(const double M[A][A]){
 // ---- |-one country-season: weekly observation-relevant incidence as a fraction of each age group ----
 // inc is n_weeks x A in COLUMN-MAJOR order, matching an R matrix, so it can be handed straight back.
 // attack is the per-age cumulative infected fraction (S only leaves S_u/S_v by infection).
-static inline void simulate_season(int n_weeks, const double Cs[A][A], double beta,
+//
+// TWO HORIZONS, and why. n_weeks is however many weeks that country's surveillance series happens to
+// run, 33 to 53 across the panel. Integrating only that far made the attack rate a quantity measured
+// over the OBSERVED WINDOW while figure 11 called it "over the season" and compared it with cohort
+// evidence: for 5 of 86 country-seasons the modelled epidemic was still running when the window ended,
+// and the reported number moved by up to 15% (IT 2015/2016, window 38 weeks) purely because Italy's
+// series stopped early. n_weeks_dyn (>= n_weeks) is the horizon the DYNAMICS run to, so attack is a
+// season quantity for every country-season alike. Only the first n_weeks are written to inc, so the
+// likelihood is bit-identical -- verified: padding every window to 53 weeks changed the negative
+// log-likelihood by exactly 0.
+static inline void simulate_season(int n_weeks, int n_weeks_dyn, const double Cs[A][A], double beta,
                                    double S0, double I0, double gamma,
                                    double ve_inf, double ve_ili, double ve_spread,
                                    int vax_day, double vax_eld,
@@ -67,7 +77,7 @@ static inline void simulate_season(int n_weeks, const double Cs[A][A], double be
   const double vax[A] = {0.0, 0.0, vax_eld};      // only the 65+ group is vaccinated
   const double s_spread = 1.0 - ve_spread, e_inf = 1.0 - ve_inf, w_ili = 1.0 - ve_ili;
   int day = 0;
-  for (int t = 0; t < n_weeks; ++t){
+  for (int t = 0; t < n_weeks_dyn; ++t){
     for (int a = 0; a < A; ++a) acc[a] = 0.0;    // the accumulator resets every observation week
     for (int k = 0; k < 7; ++k){
       ++day;
@@ -99,7 +109,8 @@ static inline void simulate_season(int n_weeks, const double Cs[A][A], double be
         if (Iv[a] < 0.0) Iv[a] = 0.0; else if (Iv[a] > 1.0) Iv[a] = 1.0;
       }
     }
-    for (int a = 0; a < A; ++a) inc[t + a * n_weeks] = acc[a];
+    // only the observed weeks are recorded; the tail past n_weeks advances the state for attack[] only
+    if (t < n_weeks) for (int a = 0; a < A; ++a) inc[t + a * n_weeks] = acc[a];
   }
   for (int a = 0; a < A; ++a) attack[a] = S0 - Su[a] - Sv[a];
 }
@@ -151,6 +162,10 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   const double ve_spread= as<double>(d["ve_spread"]);
   const double rate_per = as<double>(d["rate_per"]);
   const int    vax_day  = as<int>(d["vax_day"]);
+  // the season horizon the dynamics run to, so the attack rate does not depend on where a country's
+  // surveillance series happens to stop. Absent (an older cached d) falls back to 0 = the old
+  // behaviour, which keeps a stale object readable rather than erroring on it.
+  const int attack_weeks = d.containsElementNamed("attack_weeks") ? as<int>(d["attack_weeks"]) : 0;
 
   const List Cn_list = d["Cn"];  const List N_list = d["N"];
   const IntegerVector n_src = d["n_src"];  const IntegerVector off_country = d["off_country"];
@@ -206,7 +221,10 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
 
     inc.assign((size_t)nw * A, 0.0);
     double attack[A];
-    simulate_season(nw, Cs, beta, S0, I0, gamma, ve_inf, ve_ili, ve_spread, vax_day, vax_eld[ics],
+    // the dynamics run to the season horizon so attack[] is comparable across country-seasons, while
+    // only the nw observed weeks feed the likelihood (see simulate_season)
+    const int nw_dyn = attack_weeks > nw ? attack_weeks : nw;
+    simulate_season(nw, nw_dyn, Cs, beta, S0, I0, gamma, ve_inf, ve_ili, ve_spread, vax_day, vax_eld[ics],
                     inc.data(), attack);
 
     NumericMatrix mu_m;

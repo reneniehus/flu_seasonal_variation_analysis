@@ -72,6 +72,39 @@ estimates; no parameter is allowed to vary in more than one direction at a time.
 Total about 184, of which 16 are shared across countries and 168 are local to one country. The
 likelihood is therefore separable given the shared block, which is what the fitting strategy exploits.
 
+## What the data layer does and does not support (audited 2026-09-16)
+
+The model code had been audited; the data layer under it had not. It reconstructs correctly — all 86
+country-season observation matrices rebuild **exactly** from the raw streams by independent code (max
+count difference 0), the age bands and populations are mutually consistent to the person, missing cells
+are genuinely missing, and the season boundaries are the documented 1 August. Five things nonetheless
+qualify what can be read off the output:
+
+- **Season support is uneven, and the thinnest season carries the highest `R0`.** `2025/2026` rests on
+  **7 of the 12 countries** (DK, EE, FR, BE, IE, PL, HR), on grids of 34–41 weeks against 52–53
+  elsewhere, and 774 observed cells against 1497 for 2023/2024 — and its fitted `R0` of 1.71 is the
+  highest of the eight. `jm_summary_season` now reports `n_country`, `obs_cells` and the grid range
+  alongside `R0`, so no season-level number is read without its sample size.
+- **Norway has no contact matrix of its own** and is fitted on the EU average collapsed with Norwegian
+  populations. That matters because the age reporting offsets are the parameters most sensitive to the
+  mixing pattern: re-optimising Norway's block under neighbouring countries' matrices moves its elderly
+  offset by up to 66% for a likelihood spread of 0.7 nats. `d$contact_source` and
+  `summary_country.csv` now name each country's matrix.
+- **The attack rate is now integrated to a fixed 53-week horizon** for every country-season. It used to
+  stop wherever that country's surveillance series stopped, so it was a window quantity reported as a
+  season quantity: five cells moved by more than 5% and IT 2015/2016 by 15% (window 38 weeks) for no
+  epidemiological reason. The likelihood is unchanged by this — verified to the last bit.
+- **A country-season's baseline can be fitted partly on the other source's weeks.** The panel stitches
+  per week, so 8 of the 86 (BE, CZ, DK, EE, HR, IE, NL, PL 2023/2024) take 3–14 weeks from ERVISS while
+  labelled RespiCompass, and for 7 of the 8 those weeks sit in the late off-season tail where the
+  baseline is essentially the whole model mean. The stitch documents the mixing; its consequence for
+  `b_c,src` is this: read `b` as a coverage-era nuisance parameter, not as a property of a surveillance
+  system.
+- **The twelve countries are a deliberate selection, not what the data admit.** At the design's own
+  inclusion rule, Iceland (7 age-complete seasons), Malta (6) and Austria (5) would also qualify and
+  were never offered to the model. Since sharing `R0_s` across the countries in the design is what
+  identifies `S0_c`, which countries are in it is a substantive choice.
+
 ## Fixed, not fitted
 
 `gamma = 1/3.6` per day; `ve_inf = 0.25`, `ve_ili_cond_inf = 0.20`, `ve_spread = 0.20`; vaccination
@@ -117,7 +150,7 @@ the value it came in with, so it can never be written back worse.
 the polish, so the returned fit is always checked. Detection is MECHANISTIC rather than
 goodness-of-fit based, because a country can fit badly for honest reasons but cannot have an epidemic
 that never happened: the trigger is the attack rate collapsing (threshold 0.03 against a measured
-minimum of 0.27 across the twelve countries) or the fitted peak being almost all baseline (0.15
+minimum of 0.30 across the twelve countries) or the fitted peak being almost all baseline (0.15
 against a measured 0.99). Per-season columns are reported too, and a PARTIAL flat line triggers when
 one season is flat while at least two others are healthy -- without that, three of the Netherlands'
 six seasons could flat-line invisibly at a cost of 3084 nats. A rescue is adopted only when it

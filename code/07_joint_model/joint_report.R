@@ -321,12 +321,15 @@ plot_jm_attack = function(fit){
     scale_colour_manual(values = .jm_gcol, name = NULL) +
     scale_y_continuous(labels = function(x) paste0(round(100 * x), "%")) +
     labs(title = "What it learns, 6: who actually gets infected",
-         subtitle = paste0("Modelled share of each age group infected over the season. Thin lines are countries, thick lines the",
-                          "\nmedian across them. This is the one output entirely free of reporting: it comes from the contact",
+         subtitle = paste0("Modelled share of each age group infected over a full ", d$attack_weeks,
+                          "-week season. Thin lines are countries, thick lines",
+                          "\nthe median across them. This is the one output entirely free of reporting: it comes from the contact",
                           "\nmatrix, the global elderly susceptibility (fitted at ", sprintf("%.2f", p$sigma_eld),
                           "x an adult's) and vaccination, not from how",
                           "\nmany consultations were counted. So compare it with prospective cohort evidence, never with",
-                          "\nsurveillance curves."),
+                          "\nsurveillance curves. The dynamics run to the same horizon for every country-season, so these are",
+                          "\ncomparable with each other: read over only the weeks each country happened to report, five cells",
+                          "\nmoved by more than 5% and one by 15% for no epidemiological reason at all."),
          x = NULL, y = "attack rate") +
     .jm_theme() + theme(axis.text.x = element_text(angle = 30, hjust = 1))
 }

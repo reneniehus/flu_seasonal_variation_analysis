@@ -478,3 +478,85 @@ test_that("the pipeline writes the figure set WITH uncertainty intervals", {
                                 dir = withr::local_tempdir()),
                  "WITHOUT uncertainty")
 })
+
+# ---- the data object must be the design the documents describe ----
+test_that("the default design is the documented one, and the attack rate is a season quantity", {
+  # FINDING: min_seasons defaulted to 6 while the owner's decision (2026-09-12) was 5. Only the
+  # runner passed the override, so anyone reproducing "the model" as MODEL.md describes it silently
+  # got 11 countries / 81 country-seasons / 173 parameters. No test pinned the real candidate list,
+  # because the small designs used above all have 8 seasons and never exercise the default.
+  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
+  cand <- c("DK", "EE", "ES", "FR", "NO", "BE", "CZ", "IE", "IT", "PL", "HR", "NL")
+  dd <- withr::with_dir(here::here(), jm_build_data(cand, models_in, demo, verbose = FALSE))
+  expect_equal(dd$n_country, 12L)
+  expect_equal(dd$n_cs, 86L)
+  expect_equal(dd$n_par, 184L)
+  expect_true("ES" %in% dd$countries)            # the country the decision was about
+  # the dynamics horizon is a full season for every cell, and the observation windows are not
+  expect_gte(dd$attack_weeks, max(dd$n_weeks))
+  expect_true(any(dd$n_weeks < dd$attack_weeks))
+  # THE GUARANTEE: running the dynamics past the observation window must not touch the likelihood
+  fit0 <- readRDS(here::here("output/joint_model/joint_fit.rds"))$fit
+  d_short <- dd; d_short$attack_weeks <- 0L      # the old behaviour
+  expect_equal(jm_negll_cpp(fit0$theta, dd), jm_negll_cpp(fit0$theta, d_short), tolerance = 1e-12)
+  # ... but it does change the attack rate, which is the point
+  a_season <- jm_fitted_cpp(fit0$theta, dd)$attack
+  a_window <- jm_fitted_cpp(fit0$theta, d_short)$attack
+  expect_gt(max(abs(a_season - a_window) / a_window), 0.05)
+  expect_true(all(a_season >= a_window - 1e-12))  # a longer horizon can only add infections
+  # and the provenance of each country's mixing pattern travels with the fit
+  expect_equal(length(dd$contact_source), dd$n_country)
+  expect_equal(unname(dd$contact_source[dd$countries == "NO"]), "EU average")
+})
+
+test_that("an unresolved season or source label fails in R instead of aborting in C++", {
+  # FINDING: cs_season and cs_src come from match() - 1L, which is NA for an unknown label, and srcs
+  # is built with sort(unique(...)) which DROPS NA -- so one unresolved source label yields an NA
+  # index that the C++ uses raw (logb[NA_INTEGER] = logb[INT_MIN]), killing the R process outright.
+  # The guard has to be in jm_build_data, because by the time the C++ sees it there is no recovery.
+  src <- paste(readLines(here::here("code/07_joint_model/joint_model.R")), collapse = "\n")
+  expect_match(src, "anyNA\\(cs_season\\)")
+  expect_match(src, "anyNA\\(cs_src\\)")
+  # the mechanism the guard exists for, demonstrated without touching the C++
+  expect_true(is.na(match("no_such_source", sort(unique(c("ERVISS", NA))))))
+  expect_equal(sort(unique(c("ERVISS", NA_character_))), "ERVISS")   # sort() drops the NA
+})
+
+test_that("the two settings files cannot silently disagree about the rate basis", {
+  # FINDING: d$y is built with comp_model_settings() while d$rate_per is stored from jm_settings().
+  # They agreed only by coincidence; a change to one alone would put the counts on one basis and
+  # every per-100k conversion on another (figure 03 out by 10x, every baseline b silently rescaled).
+  expect_equal(jm_settings()$rate_per, comp_model_settings()$rate_per)
+  bad <- modifyList(jm_settings(), list(rate_per = 1e6))
+  expect_error(withr::with_dir(here::here(),
+                 jm_build_data(c("DK", "EE"), models_in, demo, set = bad, verbose = FALSE)),
+               "rate_per disagrees")
+})
+
+test_that("the vaccination fallback degrades instead of dying when the external file is absent", {
+  # FINDING: `ext = ... else c()` made ext NULL, so is.na(ext[s]) was logical(0) and the documented
+  # four-step fallback ladder raised "argument is of length zero" for every country.
+  cov <- .cm_vax_coverage("DK", c("2014/2015", "2023/2024"), models_in,
+                          ext_path = here::here("data/external/__absent__.csv"))
+  expect_equal(nrow(cov), 2L)
+  expect_true(all(is.finite(cov$coverage)))
+  expect_true(all(!is.na(cov$provenance)))
+  # and it agrees with the real call wherever the external file is not the source used
+  real <- .cm_vax_coverage("DK", c("2014/2015", "2023/2024"), models_in)
+  expect_equal(cov$coverage[real$provenance != "data/external post-COVID"],
+               real$coverage[real$provenance != "data/external post-COVID"])
+})
+
+test_that("a season-level number is never reported without its sample size", {
+  # FINDING: season support is uneven (the last season rests on 7 of 12 countries and ~half the
+  # weekly cells of the richest) and it carries the highest fitted R0, but jm_summary_season
+  # returned R0 and visibility with nothing to say how much data stood behind them.
+  small <- jm_fit(d, max_sweeps = 1L, cores = 1, verbose = FALSE)
+  s <- jm_summary_season(small)
+  expect_true(all(c("n_country", "obs_cells", "last_week_min", "last_week_max") %in% names(s)))
+  expect_equal(sum(s$n_country), d$n_cs)
+  expect_equal(sum(s$obs_cells), sum(vapply(d$y, function(m) sum(is.finite(m)), numeric(1))))
+  expect_true(all(s$last_week_min <= s$last_week_max))
+  # and the country table carries which mixing pattern each country's offsets were fitted under
+  expect_true("contact" %in% names(jm_summary_country(small)))
+})
