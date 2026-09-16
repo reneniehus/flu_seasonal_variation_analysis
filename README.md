@@ -162,6 +162,7 @@ Where each kind of information lives:
 | `documentation/documentation.Rmd` | the model maths / science (SIR, inference, contact matrix) |
 | `code/07_joint_model/MODEL.md` | the WORKING model: its abstract, what varies where, what was cut and why, and whether it recovers a known truth |
 | `documentation/decisions.md` | **why** — rationale for key modelling / method / data decisions |
+| `documentation/to_confirm_with_surveillance.md` | **what we inferred rather than know** — open questions about what the source data MEAN, for surveillance colleagues, with what changes under each answer |
 | `documentation/analysis_strategy.md` | the driver analysis — strategy, principles, what we've learned, ranked next steps |
 | `documentation/findings_descriptors.md` | results of the descriptor / driver analyses |
 | `documentation/external_drivers.md` | externally-sourced drivers (subtype, vaccination, climate, VE) — provenance, values, caveats |

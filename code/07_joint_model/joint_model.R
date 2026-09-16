@@ -60,7 +60,7 @@ jm_load_cpp = function(dir = "output/joint_model/cpp_cache"){
 # documents describe it silently got an 11-country / 81 / 173 design instead, announced by one buried
 # line of verbose output. The default now IS the decision, and a test pins the resulting design.
 jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_seasons = 5L,
-                         exclude_ambiguous_positivity = TRUE, ambiguous_min_weeks = 1L,
+                         exclude_ambiguous_positivity = TRUE, ambiguous_min_unexplained = 1L,
                          verbose = TRUE){
   # The data layer is configured by comp_model_settings() (line below) while `set` supplies the same
   # two constants to the fitted object. They agree today only by coincidence -- nothing tied them --
@@ -74,25 +74,36 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
     if (verbose) cat("  dropping duplicate country code(s):", paste(dup, collapse = ", "), "\n")
     countries = unique(countries)
   }
-  # PROVISIONAL EXCLUSION, PENDING CONFIRMATION BY SURVEILLANCE COLLEAGUES (owner, 2026-09-16).
+  # PROVISIONAL EXCLUSION, PENDING CONFIRMATION BY SURVEILLANCE COLLEAGUES.
+  # See documentation/to_confirm_with_surveillance.md (question 1) and erviss_encoding_ambiguous().
+  #
   # ERVISS encodes a zero-detection week two ways -- "detections = 0" explicitly, or the detections
   # row absent with tests > 0 -- and our re-derived positivity turns the second into NA, which the
-  # stitch deletes. A trailing run of them shortens the season instead of leaving holes, so a
-  # country-season can be fitted on a window with no off-season in it and nothing says so. See
-  # erviss_encoding_ambiguous() in stitch_iliplus.R for the two readings and why the choice is not
-  # ours. Until it is settled the affected country-seasons are dropped: that neither invents zeros
-  # nor fits a truncated window. Set exclude_ambiguous_positivity = FALSE to fit them anyway, or
-  # raise ambiguous_min_weeks to tolerate a stray week (a single interior week is a hole, not a
-  # truncation, and costs far less than losing the season).
+  # stitch deletes; a trailing run shortens the season instead of leaving holes.
+  #
+  # WHAT IS EXCLUDED IS DECIDED ON THE EVIDENCE, not on a count of affected weeks (owner,
+  # 2026-09-16). For each affected week, erviss_encoding_ambiguous computes the probability that it
+  # really was zero, from that week's test count and the local positivity of its published
+  # neighbours. A country-season is excluded only if it contains weeks that CANNOT plausibly have
+  # been zero -- implausible under the local positivity, or unknowable because nothing was published
+  # nearby. That distinction is the whole point: it excludes CZ 2024/2025, where one week expected
+  # ~4 detections (p = 0.014) and sixteen more have no published neighbour at all, while keeping
+  # PL 2024/2025, whose single affected week sits among neighbours with 0 detections over 114 tests
+  # (p = 1.000) and is almost certainly a genuine zero. A count threshold would have separated those
+  # two only by luck.
+  #
+  # exclude_ambiguous_positivity = FALSE fits everything; ambiguous_min_unexplained raises how many
+  # not-plausibly-zero weeks a country-season may carry before it is dropped.
   ambig = NULL
   if (exclude_ambiguous_positivity){
     ambig = tryCatch(erviss_encoding_ambiguous(models_in), error = function(e) NULL)
     if (is.null(ambig) && verbose)
       cat("  NOTE: could not evaluate the positivity-encoding flag; no season excluded for it\n")
-    else ambig = ambig[ambig$n_ambiguous >= ambiguous_min_weeks, , drop = FALSE]
+    else ambig = ambig[ambig$n_not_plausibly_zero >= ambiguous_min_unexplained, , drop = FALSE]
   }
   excluded = data.frame(country = character(0), season = character(0), n_ambiguous = integer(0),
-                        stringsAsFactors = FALSE)
+                        n_not_plausibly_zero = integer(0), n_no_neighbour = integer(0),
+                        min_p_zero = numeric(0), stringsAsFactors = FALSE)
 
   cds = list()
   for (cc in countries){
@@ -115,9 +126,13 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
       if (nrow(sub)){
         drop_i = which(cd$seasons %in% sub$season)
         if (length(drop_i)){
+          j = match(cd$seasons[drop_i], sub$season)
           excluded = rbind(excluded, data.frame(
             country = cc, season = cd$seasons[drop_i],
-            n_ambiguous = sub$n_ambiguous[match(cd$seasons[drop_i], sub$season)],
+            n_ambiguous = sub$n_ambiguous[j],
+            n_not_plausibly_zero = sub$n_not_plausibly_zero[j],
+            n_no_neighbour = sub$n_no_neighbour[j],
+            min_p_zero = sub$min_p_zero[j],
             stringsAsFactors = FALSE))
           if (verbose) cat("  ", cc, ": excluding", length(drop_i),
                            "season(s) for ambiguous positivity encoding:",
@@ -222,8 +237,9 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
                   nrow(excluded)))
       cat("  awaiting confirmation from surveillance colleagues, see erviss_encoding_ambiguous()):\n")
       for (k in seq_len(nrow(excluded)))
-        cat(sprintf("    %s %s (%d week(s) with tests > 0 and no detections row)\n",
-                    excluded$country[k], excluded$season[k], excluded$n_ambiguous[k]))
+        cat(sprintf("    %s %s: %d affected week(s), of which %d cannot plausibly have been zero (%d with no published neighbour at all)\n",
+                    excluded$country[k], excluded$season[k], excluded$n_ambiguous[k],
+                    excluded$n_not_plausibly_zero[k], excluded$n_no_neighbour[k]))
     }
   }
   d

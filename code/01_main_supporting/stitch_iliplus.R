@@ -55,24 +55,57 @@ stitch_covid_seasons <- c("2019/2020", "2020/2021", "2021/2022", "2022/2023")
 #
 # Returns one row per affected country-season, on the positivity stream that country's ILI+ actually
 # uses, so a non-sentinel country is judged on its non-sentinel file. A pure function of models_in.
-erviss_encoding_ambiguous <- function(models_in){
+# WHICH WEEKS COULD REALLY HAVE BEEN ZERO. Analysed 2026-09-16 on the surrounding time series, at the
+# owner's suggestion, and the answer is not the same for every week -- so the exclusion is decided on
+# THAT rather than on a count of affected weeks, which would only separate the real cases by luck:
+#   - p_zero = P(0 detections | that week's tests, the local positivity of published weeks within
+#     +/- `nb_weeks`) under a binomial. Zero is called plausible at p_zero >= `p_plausible`.
+#   - a week with NO published neighbour is UNKNOWABLE from the data, not plausible: that is CZ from
+#     2025-03-26, whose detections feed went dark for the rest of the season.
+# Measured: zero is plausible for 82% of the 177 affected weeks that have neighbours, against 96% of
+# genuine explicit zeros -- so most absent rows do look like quiet weeks, but a minority cannot be.
+erviss_encoding_ambiguous <- function(models_in, nb_weeks = 3L, p_plausible = 0.05){
   r <- .stitch_rules
   x <- models_in$data_timeseries_long %>%
     filter(pathogen == "Influenza", agegroup == "age_total",
            indicator %in% c("detections", "tests"),
            stream %in% c("typing_sentinel", "typing_nonsentinel")) %>%
-    select(country_short, season, season_week, stream, indicator, value) %>%
+    select(country_short, season, season_week, date, stream, indicator, value) %>%
     tidyr::pivot_wider(names_from = indicator, values_from = value)
-  if (!all(c("detections", "tests") %in% names(x))) return(x[0, c("country_short", "season")])
-  x %>%
-    # judge each country on the stream its own ILI+ is built from (.stitch_rules$nonsentinel)
+  empty <- data.frame(country_short = character(0), season = character(0), n_ambiguous = integer(0),
+                      n_not_plausibly_zero = integer(0), first_week = integer(0), last_week = integer(0),
+                      stringsAsFactors = FALSE)
+  if (!all(c("detections", "tests") %in% names(x))) return(empty)
+  # judge each country on the stream its own ILI+ is built from (.stitch_rules$nonsentinel)
+  x <- x %>%
     mutate(used = ifelse(country_short %in% r$nonsentinel, "typing_nonsentinel", "typing_sentinel")) %>%
-    filter(stream == used,
-           is.finite(tests), tests > 0, is.na(detections)) %>%   # tests happened, count not published
+    filter(stream == used) %>%
+    arrange(country_short, date)
+  x$ambiguous <- is.finite(x$tests) & x$tests > 0 & is.na(x$detections)
+  if (!any(x$ambiguous)) return(empty)
+  pub <- is.finite(x$detections) & is.finite(x$tests) & x$tests > 0      # weeks with a usable count
+  span <- as.numeric(nb_weeks) * 7
+  amb_i <- which(x$ambiguous)
+  x$p_zero <- NA_real_
+  for (i in amb_i){
+    nb <- pub & x$country_short == x$country_short[i] &
+          abs(as.numeric(x$date - x$date[i])) <= span & seq_len(nrow(x)) != i
+    if (!any(nb)) next                                       # no neighbour -> stays NA -> unknowable
+    tt <- sum(x$tests[nb]); if (tt <= 0) next
+    x$p_zero[i] <- (1 - sum(x$detections[nb]) / tt)^x$tests[i]
+  }
+  x %>% filter(ambiguous) %>%
     group_by(country_short, season) %>%
     summarise(n_ambiguous = dplyr::n(),
+              # the count that decides the exclusion: weeks that CANNOT plausibly have been zero,
+              # either because the local positivity makes zero implausible or because nothing was
+              # published nearby to judge against
+              n_not_plausibly_zero = sum(is.na(p_zero) | p_zero < p_plausible),
+              n_no_neighbour = sum(is.na(p_zero)),
+              min_p_zero = suppressWarnings(min(p_zero, na.rm = TRUE)),
               first_week = min(season_week), last_week = max(season_week), .groups = "drop") %>%
-    arrange(desc(n_ambiguous))
+    mutate(min_p_zero = ifelse(is.finite(min_p_zero), min_p_zero, NA_real_)) %>%
+    arrange(desc(n_not_plausibly_zero), desc(n_ambiguous))
 }
 
 # ---- |-week-level stitched values for one or more age groups (the shared core) ----

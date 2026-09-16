@@ -2,64 +2,32 @@
 
 One page. What it assumes, why it is simpler than the compartmental pilot, and what was cut.
 
-> ## ⚠ OPEN QUESTION FOR SURVEILLANCE COLLEAGUES — affects what the model is fitted to
+> ## ⚠ ONE OPEN QUESTION ABOUT THE SOURCE DATA — it affects what the model is fitted to
 >
-> **What does an ECDC/ERVISS week with `tests > 0` and no `detections` row mean?** Zero detections, or
-> an unpublished count?
+> **Does an ERVISS week with `tests > 0` and no `detections` row mean zero detections, or an
+> unpublished count?** 3151 weeks state `detections = 0` explicitly; 709 omit the row with tests
+> recorded, and no published positivity value rescues any of them.
 >
-> The raw typing files encode a week with no influenza detections in two different ways: **3151 weeks
-> state `detections = 0` explicitly** (2083 sentinel, 1068 non-sentinel), and **709 weeks report
-> `tests > 0` with the detections row simply absent** (271 sentinel, 438 non-sentinel). No published
-> positivity value rescues any of the 709. Because we re-derive positivity as detections/tests, the
-> first becomes an observed zero and the second becomes missing — and a missing ILI+ week is dropped,
-> which for a trailing run shortens the season rather than leaving holes.
+> We re-derive positivity as detections/tests, so the first becomes an observed zero and the second
+> becomes missing — and a missing week is dropped, which for a trailing run shortens the season.
 >
-> **Pending an answer, the affected country-seasons are EXCLUDED** (owner, 2026-09-16): 2 of the 86,
-> **CZ 2024/2025** (17 weeks, season weeks 34–52, which had truncated it to 36 weeks against 41–53 for
-> its other seasons) and **PL 2024/2025** (1 week, interior). The design is therefore **12 countries,
-> 8 seasons, 84 country-seasons, 181 parameters**. All 12 countries and all 8 seasons survive; CZ also
-> loses its ERVISS baseline slot, because 2024/2025 was its only ERVISS season — which is the right
-> outcome, since that slot was otherwise fitted with no off-season behind it.
+> **Pending an answer we exclude the country-seasons containing weeks that CANNOT plausibly have been
+> zero** — judged per week from that week's test count against the local positivity of its published
+> neighbours, not from a count of affected weeks. In the fitted design that is **CZ 2024/2025 alone**
+> (14 of its 17 affected weeks are not plausibly zero, 13 of them with no published neighbour at all,
+> because CZ's detections feed went dark on 2025-03-26). **PL 2024/2025 is kept**: its single affected
+> week sits among neighbours with 0 detections over 114 tests, so it is almost certainly a real zero.
 >
-> Across the whole 25-country panel the encoding affects **301 weeks in 34 country-seasons of 12
-> countries** (AT, BG, CZ, HU, IS, IT, LT, LV, MT, PL, RO, SK), so this matters more if the design ever
-> expands — notably to Iceland or Malta, both of which otherwise qualify.
+> The design is therefore **12 countries, 8 seasons, 85 country-seasons, 182 parameters**. All 12
+> countries and all 8 seasons survive. CZ also loses its ERVISS baseline slot, because 2024/2025 was
+> its only ERVISS season — the right outcome, since that slot was otherwise fitted with no off-season
+> behind it.
 >
-> ### What the surrounding time series say (analysed 2026-09-16)
->
-> Four tests, and they do **not** give the same answer for the two cases.
->
-> 1. **Omission is not the format's way of writing zero.** 18 of 30 countries have **zero** absent rows
->    and write explicit zeros throughout. Only IT and MT omit without ever writing a zero. Ten
->    countries do BOTH — CZ has 79 explicit zeros *and* 30 absent rows; PL has 136 and 1. So an absent
->    row is a country-and-period reporting lapse, not a documented encoding.
-> 2. **Absent weeks are not preferentially off-season.** Median season week 19 with 32% at week 40+,
->    against 24 and 37% for explicit zeros. Quiet weeks they are, but not off-season ones.
-> 3. **Binomial plausibility.** For each absent week, P(0 detections | that week's tests, local
->    positivity from published weeks within ±3): zero is plausible (P ≥ 0.05) for **82%** of the 177
->    with usable neighbours, against **96%** for genuine explicit zeros — so absent weeks are
->    measurably *less* consistent with being true zeros than real zeros are. 10 weeks are essentially
->    impossible as zeros.
-> 4. **The two design cases come out differently.**
->    - **PL 2024/2025 week 3**: 13 tests, neighbours **0 detections over 114 tests** (0% positivity),
->      **P(0) = 1.000**. A one-off gap in a quiet pre-season week. **Zero is overwhelmingly plausible.**
->    - **CZ 2024/2025**: week 34 has 56 tests against 7.3% local positivity, so ~4 detections were
->      expected and **P(0) = 0.014**. Weeks 37–39 are plausible as zeros; weeks 40–52 have **no
->      published neighbour at all** — CZ's detections feed went dark from 2025-03-26 and did not
->      resume until the next season, so those weeks are unknowable from the data. **"Unknown" fits CZ.**
->
-> **Reading:** there is no single answer. CZ 2024/2025 should stay excluded — one week almost certainly
-> had detections and sixteen are unknowable. PL 2024/2025 is a false positive of a count-based rule and
-> would be recovered by `ambiguous_min_weeks = 2`. The general rule the evidence supports is
-> per-week-on-the-evidence (treat as zero where the local positivity makes zero plausible, as missing
-> otherwise) rather than per-season-on-a-count — **but that is still a guess about a publication
-> format, so the question above stands.**
->
-> `erviss_encoding_ambiguous()` (`stitch_iliplus.R`) derives the affected list from the model inputs;
-> `jm_build_data(exclude_ambiguous_positivity = FALSE)` fits them anyway, and
-> `ambiguous_min_weeks = 2` tolerates a stray interior week instead of losing the season.
-> **If the answer is "zero detections", the right fix is upstream — read the absent row as 0 — and
-> these exclusions should be reverted, recovering 110 panel weeks.**
+> **The full question, the evidence, and what changes under either answer are in
+> `documentation/to_confirm_with_surveillance.md` (question 1)** — along with five other things we
+> have inferred about the source data rather than confirmed. `erviss_encoding_ambiguous()` in
+> `stitch_iliplus.R` is the implementation; `jm_build_data(exclude_ambiguous_positivity = FALSE)` fits
+> everything anyway.
 
 ## Abstract
 
@@ -116,7 +84,7 @@ estimates; no parameter is allowed to vary in more than one direction at a time.
 
 ## Parameters
 
-| Parameter | Varies | Count (12 countries, 8 seasons, 84 country-seasons) | Meaning |
+| Parameter | Varies | Count (12 countries, 8 seasons, 85 country-seasons) | Meaning |
 |---|---|---|---|
 | `R0_s` | between seasons, same across countries | 8 | transmissibility of that season's virus at full susceptibility |
 | `delta_s` | between seasons, same across countries, averages zero | 8 (7 free) | that season's positive consultations per infection, relative to normal |
@@ -126,9 +94,9 @@ estimates; no parameter is allowed to vary in more than one direction at a time.
 | `off_c,young`, `off_c,eld` | between countries and age groups | 24 | age offsets on reporting, adults the reference |
 | `phi_c` | between countries | 12 | negative-binomial dispersion of the weekly counts |
 | `b_c,src` | between countries and data sources present | 21 | off-season floor, per data source (CZ has only RespiCompass once its single ERVISS season is excluded) |
-| `I0_c,s` | freely between country-seasons | 84 | seed size, i.e. arrival time of that wave |
+| `I0_c,s` | freely between country-seasons | 85 | seed size, i.e. arrival time of that wave |
 
-Total **181**, of which 16 are shared across countries and 165 are local to one country. The
+Total **182**, of which 16 are shared across countries and 166 are local to one country. The
 likelihood is therefore separable given the shared block, which is what the fitting strategy exploits.
 (Without the provisional positivity-encoding exclusion it is 86 country-seasons and 184 parameters —
 `jm_build_data(exclude_ambiguous_positivity = FALSE)`; both designs are pinned by the test suite.)
@@ -139,7 +107,9 @@ The model code had been audited; the data layer under it had not. It reconstruct
 country-season observation matrices rebuild **exactly** from the raw streams by independent code (max
 count difference 0), the age bands and populations are mutually consistent to the person, missing cells
 are genuinely missing, and the season boundaries are the documented 1 August. Five things nonetheless
-qualify what can be read off the output:
+qualify what can be read off the output (a sixth, the positivity-encoding
+exclusion, is in the box at the top of this file and in
+`documentation/to_confirm_with_surveillance.md`):
 
 - **Season support is uneven, and the thinnest season carries the highest `R0`.** `2025/2026` rests on
   **7 of the 12 countries** (DK, EE, FR, BE, IE, PL, HR), on grids of 34–41 weeks against 52–53

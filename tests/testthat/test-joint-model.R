@@ -488,14 +488,14 @@ test_that("the default design is the documented one, and the attack rate is a se
   cand <- c("DK", "EE", "ES", "FR", "NO", "BE", "CZ", "IE", "IT", "PL", "HR", "NL")
   # TWO documented designs, and both are pinned. Without the positivity-encoding exclusion the
   # min_seasons = 5 decision gives 12 / 86 / 184; with it (the default since 2026-09-16, provisional
-  # pending surveillance confirmation) two country-seasons are dropped and CZ loses the ERVISS
-  # baseline slot that had no off-season behind it, giving 12 / 84 / 181.
+  # pending surveillance confirmation) CZ 2024/2025 is dropped and CZ loses the ERVISS baseline slot
+  # that had no off-season behind it, giving 12 / 85 / 182.
   full <- withr::with_dir(here::here(),
             jm_build_data(cand, models_in, demo, verbose = FALSE,
                           exclude_ambiguous_positivity = FALSE))
   expect_equal(c(full$n_country, full$n_cs, full$n_par), c(12L, 86L, 184L))
   dd <- withr::with_dir(here::here(), jm_build_data(cand, models_in, demo, verbose = FALSE))
-  expect_equal(c(dd$n_country, dd$n_cs, dd$n_par), c(12L, 84L, 181L))
+  expect_equal(c(dd$n_country, dd$n_cs, dd$n_par), c(12L, 85L, 182L))
   expect_true("ES" %in% dd$countries)            # the country the min_seasons decision was about
   expect_equal(dd$n_season, 8L)                  # no season is lost entirely by the exclusion
   # the dynamics horizon is a full season for every cell, and the observation windows are not
@@ -578,8 +578,12 @@ test_that("the ambiguous positivity encoding is detected and its seasons exclude
   # off-season with nothing reporting it. These tests pin the detector and the exclusion so neither
   # can drift while the question is open.
   a <- erviss_encoding_ambiguous(models_in)
-  expect_true(all(c("country_short", "season", "n_ambiguous") %in% names(a)))
+  expect_true(all(c("country_short", "season", "n_ambiguous", "n_not_plausibly_zero",
+                    "n_no_neighbour", "min_p_zero") %in% names(a)))
   expect_true(all(a$n_ambiguous >= 1))
+  expect_true(all(a$n_not_plausibly_zero <= a$n_ambiguous))
+  expect_true(all(a$n_no_neighbour <= a$n_not_plausibly_zero))   # unknowable implies not plausible
+  expect_true(all(is.na(a$min_p_zero) | (a$min_p_zero >= 0 & a$min_p_zero <= 1)))
   # the detector must find the case that motivated it, and must not be looking at the whole panel
   # through the wrong stream: a non-sentinel country is judged on its non-sentinel file
   expect_true(any(a$country_short == "CZ" & a$season == "2024/2025"))
@@ -622,7 +626,18 @@ test_that("the ambiguous positivity encoding is detected and its seasons exclude
   # the threshold lets a stray interior week be tolerated rather than costing a whole season
   strict <- nrow(with_ex$excluded_ambiguous)
   loose <- withr::with_dir(here::here(),
-             jm_build_data(cand, models_in, demo, verbose = FALSE, ambiguous_min_weeks = 2L))
+             jm_build_data(cand, models_in, demo, verbose = FALSE, ambiguous_min_unexplained = 99L))
   expect_lte(nrow(loose$excluded_ambiguous), strict)
   expect_gte(loose$n_cs, with_ex$n_cs)
+  # THE POINT OF JUDGING PER WEEK: a country-season whose affected weeks are all plausibly zero must
+  # be KEPT. PL 2024/2025 has one affected week whose neighbours show 0 detections over 114 tests, so
+  # zero is all but certain; CZ 2024/2025 has 14 weeks that cannot plausibly be zero. A rule counting
+  # affected weeks would have separated these two only by luck.
+  expect_true(any(a$country_short == "PL" & a$season == "2024/2025"))
+  expect_equal(a$n_not_plausibly_zero[a$country_short == "PL" & a$season == "2024/2025"], 0L)
+  expect_gt(a$n_not_plausibly_zero[a$country_short == "CZ" & a$season == "2024/2025"], 0L)
+  expect_false(any(with_ex$excluded_ambiguous$country == "PL"))
+  expect_true(any(with_ex$excluded_ambiguous$country == "CZ"))
+  expect_equal(with_ex$n_cs_of_country[with_ex$countries == "PL"],
+               no_ex$n_cs_of_country[no_ex$countries == "PL"])   # PL keeps every season
 })
