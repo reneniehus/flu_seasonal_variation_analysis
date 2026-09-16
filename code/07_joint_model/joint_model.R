@@ -59,7 +59,9 @@ jm_load_cpp = function(dir = "output/joint_model/cpp_cache"){
 # only run_joint_model.R passed the override, so any other caller reproducing "the model" as the
 # documents describe it silently got an 11-country / 81 / 173 design instead, announced by one buried
 # line of verbose output. The default now IS the decision, and a test pins the resulting design.
-jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_seasons = 5L, verbose = TRUE){
+jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_seasons = 5L,
+                         exclude_ambiguous_positivity = TRUE, ambiguous_min_weeks = 1L,
+                         verbose = TRUE){
   # The data layer is configured by comp_model_settings() (line below) while `set` supplies the same
   # two constants to the fitted object. They agree today only by coincidence -- nothing tied them --
   # so a change to either file alone would silently put d$y on one basis and d$rate_per on another.
@@ -72,6 +74,26 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
     if (verbose) cat("  dropping duplicate country code(s):", paste(dup, collapse = ", "), "\n")
     countries = unique(countries)
   }
+  # PROVISIONAL EXCLUSION, PENDING CONFIRMATION BY SURVEILLANCE COLLEAGUES (owner, 2026-09-16).
+  # ERVISS encodes a zero-detection week two ways -- "detections = 0" explicitly, or the detections
+  # row absent with tests > 0 -- and our re-derived positivity turns the second into NA, which the
+  # stitch deletes. A trailing run of them shortens the season instead of leaving holes, so a
+  # country-season can be fitted on a window with no off-season in it and nothing says so. See
+  # erviss_encoding_ambiguous() in stitch_iliplus.R for the two readings and why the choice is not
+  # ours. Until it is settled the affected country-seasons are dropped: that neither invents zeros
+  # nor fits a truncated window. Set exclude_ambiguous_positivity = FALSE to fit them anyway, or
+  # raise ambiguous_min_weeks to tolerate a stray week (a single interior week is a hole, not a
+  # truncation, and costs far less than losing the season).
+  ambig = NULL
+  if (exclude_ambiguous_positivity){
+    ambig = tryCatch(erviss_encoding_ambiguous(models_in), error = function(e) NULL)
+    if (is.null(ambig) && verbose)
+      cat("  NOTE: could not evaluate the positivity-encoding flag; no season excluded for it\n")
+    else ambig = ambig[ambig$n_ambiguous >= ambiguous_min_weeks, , drop = FALSE]
+  }
+  excluded = data.frame(country = character(0), season = character(0), n_ambiguous = integer(0),
+                        stringsAsFactors = FALSE)
+
   cds = list()
   for (cc in countries){
     # Report WHY a country was dropped. "(no data)" was printed for every failure mode, including the
@@ -85,9 +107,27 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
     # references (a dead parameter) and would break the data-driven starting values, since the
     # quantile of an empty set is NA. This has to happen before n_local and off_country are computed.
     keep = which(vapply(cd$y, function(m) any(is.finite(m)), logical(1)))
+    # ... and, in the SAME prune, the seasons whose positivity encoding is ambiguous. Both have to
+    # happen before n_local and off_country are computed, or a dropped season leaves an orphaned seed
+    # slot that no country-season references.
+    if (!is.null(ambig) && nrow(ambig)){
+      sub = ambig[ambig$country_short == cc, , drop = FALSE]
+      if (nrow(sub)){
+        drop_i = which(cd$seasons %in% sub$season)
+        if (length(drop_i)){
+          excluded = rbind(excluded, data.frame(
+            country = cc, season = cd$seasons[drop_i],
+            n_ambiguous = sub$n_ambiguous[match(cd$seasons[drop_i], sub$season)],
+            stringsAsFactors = FALSE))
+          if (verbose) cat("  ", cc, ": excluding", length(drop_i),
+                           "season(s) for ambiguous positivity encoding:",
+                           paste(cd$seasons[drop_i], collapse = ", "), "\n")
+          keep = setdiff(keep, drop_i)
+        }
+      }
+    }
     if (length(keep) < length(cd$seasons)){
-      if (verbose) cat("  ", cc, ": dropping", length(cd$seasons) - length(keep),
-                       "season(s) with no finite observation\n")
+      if (verbose) cat("  ", cc, ": keeping", length(keep), "of", length(cd$seasons), "season(s)\n")
       cd$seasons = cd$seasons[keep]; cd$y = cd$y[keep]; cd$rates = cd$rates[keep]
       cd$vax = cd$vax[keep, , drop = FALSE]
       cd$source_by_season = cd$source_by_season[keep]
@@ -169,10 +209,23 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
     # the same thing in every cell to be comparable across them and against cohort evidence, so the
     # epidemic is integrated to a full season everywhere. Only the observed weeks enter the
     # likelihood, so this changes no fitted value -- see simulate_season in the C++.
-    attack_weeks = max(53L, max(as.integer(n_weeks)))
+    attack_weeks = max(53L, max(as.integer(n_weeks))),
+    # what was dropped for the ambiguous positivity encoding, so the exclusion is visible in the
+    # fitted object rather than only in a build log that scrolls away
+    excluded_ambiguous = excluded
   ), set[grep("^pr_", names(set))])
-  if (verbose) cat(sprintf("%d countries, %d seasons, %d country-seasons, %d parameters (%d shared, %d local)\n",
-                           C, S, length(y), n_par, n_shared, sum(n_local)))
+  if (verbose){
+    cat(sprintf("%d countries, %d seasons, %d country-seasons, %d parameters (%d shared, %d local)\n",
+                C, S, length(y), n_par, n_shared, sum(n_local)))
+    if (nrow(excluded)){
+      cat(sprintf("EXCLUDED for ambiguous positivity encoding (%d country-season(s), PROVISIONAL --\n",
+                  nrow(excluded)))
+      cat("  awaiting confirmation from surveillance colleagues, see erviss_encoding_ambiguous()):\n")
+      for (k in seq_len(nrow(excluded)))
+        cat(sprintf("    %s %s (%d week(s) with tests > 0 and no detections row)\n",
+                    excluded$country[k], excluded$season[k], excluded$n_ambiguous[k]))
+    }
+  }
   d
 }
 

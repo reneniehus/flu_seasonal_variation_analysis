@@ -737,3 +737,46 @@ per country-season. Not decided unilaterally because it changes what the model i
 documents, the vaccination pulse and contact-matrix mechanics inside the C++, the Euler integrator's
 accuracy and edge behaviour, the internals of the identifiability and adequacy diagnostics, the
 starting values, and end-to-end reproducibility and determinism.
+
+### 2026-09-16 (later the same day) -- the positivity-encoding question, and the provisional exclusion
+
+**Owner decision:** exclude the affected country-seasons for now, and record that the question needs
+confirmation by surveillance colleagues.
+
+**Scope, measured before acting** (the first report said "only CZ"; that was not right).
+- Raw ERVISS typing files encode a week with no influenza detections two ways: **3151 weeks say
+  `detections = 0` explicitly** (2083 sentinel, 1068 non-sentinel) and **709 weeks report `tests > 0`
+  with the detections row absent** (271 sentinel, **438 non-sentinel** -- the non-sentinel stream is
+  the worse one, and it is the stream HR, IS, MT, RO, LV and FI use). No published positivity value
+  rescues any of the 709.
+- Judged on the stream each country's own ILI+ is built from, the encoding affects **301 weeks in 34
+  country-seasons across 12 countries**: AT, BG, CZ, HU, IS, IT, LT, LV, MT, PL, RO, SK.
+- Of those, **2 of the 86 fitted country-seasons**: **CZ 2024/2025** (17 weeks, season weeks 34-52 --
+  trailing, so it had truncated the season to 36 weeks against 41-53 for CZ's other seasons, leaving
+  no off-season in it at all) and **PL 2024/2025** (1 week, season week 4 -- interior, a hole rather
+  than a truncation).
+
+**What the exclusion costs.** 12 countries and 8 seasons all survive; the design goes from 86
+country-seasons / 184 parameters to **84 / 181**. CZ additionally loses its ERVISS baseline slot,
+because 2024/2025 was CZ's only ERVISS season -- which is the right outcome, since that slot was
+otherwise being fitted with no off-season behind it (the defect the audit flagged). 2024/2025 now rests
+on 8 countries rather than 10.
+
+**A judgement call left visible.** Excluding PL 2024/2025 costs a whole season for ONE interior missing
+week. `ambiguous_min_weeks = 2` keeps it (85 country-seasons / 182 parameters) and drops only CZ. The
+default is the strict reading of the instruction; the parameter is there because the two cases are not
+really alike.
+
+**Implementation.** `erviss_encoding_ambiguous()` in `stitch_iliplus.R` derives the affected list from
+`models_in` (a pure function -- verified to reproduce the raw-file counts exactly), and `jm_build_data`
+prunes those country-seasons in the SAME pass as the no-observation prune, before `n_local` and
+`off_country` are computed, so no orphaned seed or baseline slot can survive. `d$excluded_ambiguous`
+records what went and why. Both designs -- with and without the exclusion -- are pinned by tests,
+including that no excluded country-season reaches the fitted design and that the layout stays exact.
+
+**If the answer is "an absent row means zero detections"** (which the 3151 explicit zeros make
+plausible) the right fix is upstream in `gen_model_input.R` -- read the absent row as 0 -- and these
+exclusions should be reverted, recovering 110 panel weeks and 2 fitted country-seasons. **If it means
+the count is genuinely unpublished**, the exclusion stays, and the separate defect of a trailing run
+shortening the grid rather than leaving holes should also be fixed. Either way this is a question about
+what ECDC's publication format means, not about our code.

@@ -485,22 +485,31 @@ test_that("the default design is the documented one, and the attack rate is a se
   # runner passed the override, so anyone reproducing "the model" as MODEL.md describes it silently
   # got 11 countries / 81 country-seasons / 173 parameters. No test pinned the real candidate list,
   # because the small designs used above all have 8 seasons and never exercise the default.
-  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
   cand <- c("DK", "EE", "ES", "FR", "NO", "BE", "CZ", "IE", "IT", "PL", "HR", "NL")
+  # TWO documented designs, and both are pinned. Without the positivity-encoding exclusion the
+  # min_seasons = 5 decision gives 12 / 86 / 184; with it (the default since 2026-09-16, provisional
+  # pending surveillance confirmation) two country-seasons are dropped and CZ loses the ERVISS
+  # baseline slot that had no off-season behind it, giving 12 / 84 / 181.
+  full <- withr::with_dir(here::here(),
+            jm_build_data(cand, models_in, demo, verbose = FALSE,
+                          exclude_ambiguous_positivity = FALSE))
+  expect_equal(c(full$n_country, full$n_cs, full$n_par), c(12L, 86L, 184L))
   dd <- withr::with_dir(here::here(), jm_build_data(cand, models_in, demo, verbose = FALSE))
-  expect_equal(dd$n_country, 12L)
-  expect_equal(dd$n_cs, 86L)
-  expect_equal(dd$n_par, 184L)
-  expect_true("ES" %in% dd$countries)            # the country the decision was about
+  expect_equal(c(dd$n_country, dd$n_cs, dd$n_par), c(12L, 84L, 181L))
+  expect_true("ES" %in% dd$countries)            # the country the min_seasons decision was about
+  expect_equal(dd$n_season, 8L)                  # no season is lost entirely by the exclusion
   # the dynamics horizon is a full season for every cell, and the observation windows are not
   expect_gte(dd$attack_weeks, max(dd$n_weeks))
   expect_true(any(dd$n_weeks < dd$attack_weeks))
-  # THE GUARANTEE: running the dynamics past the observation window must not touch the likelihood
+  # THE GUARANTEE: running the dynamics past the observation window must not touch the likelihood.
+  # Checked on the 86-cell design, because the cached fit's theta belongs to that layout.
+  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
   fit0 <- readRDS(here::here("output/joint_model/joint_fit.rds"))$fit
-  d_short <- dd; d_short$attack_weeks <- 0L      # the old behaviour
-  expect_equal(jm_negll_cpp(fit0$theta, dd), jm_negll_cpp(fit0$theta, d_short), tolerance = 1e-12)
+  skip_if_not(length(fit0$theta) == full$n_par, "cached fit predates this layout")
+  d_short <- full; d_short$attack_weeks <- 0L    # the old behaviour
+  expect_equal(jm_negll_cpp(fit0$theta, full), jm_negll_cpp(fit0$theta, d_short), tolerance = 1e-12)
   # ... but it does change the attack rate, which is the point
-  a_season <- jm_fitted_cpp(fit0$theta, dd)$attack
+  a_season <- jm_fitted_cpp(fit0$theta, full)$attack
   a_window <- jm_fitted_cpp(fit0$theta, d_short)$attack
   expect_gt(max(abs(a_season - a_window) / a_window), 0.05)
   expect_true(all(a_season >= a_window - 1e-12))  # a longer horizon can only add infections
@@ -559,4 +568,61 @@ test_that("a season-level number is never reported without its sample size", {
   expect_true(all(s$last_week_min <= s$last_week_max))
   # and the country table carries which mixing pattern each country's offsets were fitted under
   expect_true("contact" %in% names(jm_summary_country(small)))
+})
+
+test_that("the ambiguous positivity encoding is detected and its seasons excluded", {
+  # PROVISIONAL, pending confirmation by surveillance colleagues (owner, 2026-09-16). ERVISS encodes
+  # a zero-detection week two ways -- "detections = 0" explicitly, or the detections row absent with
+  # tests > 0 -- and our re-derived positivity turns the second into NA, which the stitch deletes. A
+  # trailing run then SHORTENS the season, so a country-season can be fitted on a window containing no
+  # off-season with nothing reporting it. These tests pin the detector and the exclusion so neither
+  # can drift while the question is open.
+  a <- erviss_encoding_ambiguous(models_in)
+  expect_true(all(c("country_short", "season", "n_ambiguous") %in% names(a)))
+  expect_true(all(a$n_ambiguous >= 1))
+  # the detector must find the case that motivated it, and must not be looking at the whole panel
+  # through the wrong stream: a non-sentinel country is judged on its non-sentinel file
+  expect_true(any(a$country_short == "CZ" & a$season == "2024/2025"))
+  expect_gte(a$n_ambiguous[a$country_short == "CZ" & a$season == "2024/2025"], 10L)
+  # a week that says detections = 0 EXPLICITLY must not be flagged -- that is an observed zero, and
+  # confusing the two would throw away thousands of legitimately quiet weeks
+  raw <- models_in$data_timeseries_long
+  z <- raw[raw$pathogen == "Influenza" & raw$agegroup == "age_total" &
+           raw$indicator == "detections" & raw$stream == "typing_sentinel" &
+           is.finite(raw$value) & raw$value == 0, ]
+  expect_gt(nrow(z), 1000L)      # they exist in quantity, and none of them is an ambiguous week
+
+  cand <- c("DK", "EE", "ES", "FR", "NO", "BE", "CZ", "IE", "IT", "PL", "HR", "NL")
+  with_ex <- withr::with_dir(here::here(), jm_build_data(cand, models_in, demo, verbose = FALSE))
+  no_ex   <- withr::with_dir(here::here(), jm_build_data(cand, models_in, demo, verbose = FALSE,
+                                                         exclude_ambiguous_positivity = FALSE))
+  # the exclusion is ON by default and costs exactly the affected country-seasons
+  expect_lt(with_ex$n_cs, no_ex$n_cs)
+  expect_equal(nrow(with_ex$excluded_ambiguous), no_ex$n_cs - with_ex$n_cs)
+  expect_equal(nrow(no_ex$excluded_ambiguous), 0L)
+  expect_true(all(paste(with_ex$excluded_ambiguous$country, with_ex$excluded_ambiguous$season) %in%
+                  paste(a$country_short, a$season)))
+  # no excluded country-season survives into the fitted design
+  kept <- paste(with_ex$countries[with_ex$cs_country + 1L], with_ex$seasons[with_ex$cs_season + 1L])
+  expect_false(any(paste(with_ex$excluded_ambiguous$country,
+                         with_ex$excluded_ambiguous$season) %in% kept))
+  # and the LAYOUT stays exactly consistent after the prune -- the failure mode being an orphaned
+  # seed or baseline slot that no country-season references
+  expect_equal(length(jm_par_names(with_ex)), with_ex$n_par)
+  bl <- jm_blocks(with_ex)
+  expect_equal(sort(c(bl$shared, unlist(bl$local))), seq_len(with_ex$n_par))
+  expect_equal(with_ex$n_par, 2L * with_ex$n_season + sum(with_ex$n_local))
+  expect_true(is.finite(jm_negll_cpp(jm_theta0(with_ex), with_ex)))
+  for (ic in seq_len(with_ex$n_country))   # a source slot must never survive without data
+    expect_equal(with_ex$n_src[ic],
+                 length(unique(with_ex$cs_src[with_ex$cs_of_country[[ic]] + 1L])))
+  # dropping CZ's only ERVISS season must remove CZ's ERVISS baseline, not leave it inert
+  expect_equal(with_ex$sources[[which(with_ex$countries == "CZ")]], "RespiCompass")
+
+  # the threshold lets a stray interior week be tolerated rather than costing a whole season
+  strict <- nrow(with_ex$excluded_ambiguous)
+  loose <- withr::with_dir(here::here(),
+             jm_build_data(cand, models_in, demo, verbose = FALSE, ambiguous_min_weeks = 2L))
+  expect_lte(nrow(loose$excluded_ambiguous), strict)
+  expect_gte(loose$n_cs, with_ex$n_cs)
 })

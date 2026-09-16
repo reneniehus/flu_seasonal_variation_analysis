@@ -2,6 +2,35 @@
 
 One page. What it assumes, why it is simpler than the compartmental pilot, and what was cut.
 
+> ## ⚠ OPEN QUESTION FOR SURVEILLANCE COLLEAGUES — affects what the model is fitted to
+>
+> **What does an ECDC/ERVISS week with `tests > 0` and no `detections` row mean?** Zero detections, or
+> an unpublished count?
+>
+> The raw typing files encode a week with no influenza detections in two different ways: **3151 weeks
+> state `detections = 0` explicitly** (2083 sentinel, 1068 non-sentinel), and **709 weeks report
+> `tests > 0` with the detections row simply absent** (271 sentinel, 438 non-sentinel). No published
+> positivity value rescues any of the 709. Because we re-derive positivity as detections/tests, the
+> first becomes an observed zero and the second becomes missing — and a missing ILI+ week is dropped,
+> which for a trailing run shortens the season rather than leaving holes.
+>
+> **Pending an answer, the affected country-seasons are EXCLUDED** (owner, 2026-09-16): 2 of the 86,
+> **CZ 2024/2025** (17 weeks, season weeks 34–52, which had truncated it to 36 weeks against 41–53 for
+> its other seasons) and **PL 2024/2025** (1 week, interior). The design is therefore **12 countries,
+> 8 seasons, 84 country-seasons, 181 parameters**. All 12 countries and all 8 seasons survive; CZ also
+> loses its ERVISS baseline slot, because 2024/2025 was its only ERVISS season — which is the right
+> outcome, since that slot was otherwise fitted with no off-season behind it.
+>
+> Across the whole 25-country panel the encoding affects **301 weeks in 34 country-seasons of 12
+> countries** (AT, BG, CZ, HU, IS, IT, LT, LV, MT, PL, RO, SK), so this matters more if the design ever
+> expands — notably to Iceland or Malta, both of which otherwise qualify.
+>
+> `erviss_encoding_ambiguous()` (`stitch_iliplus.R`) derives the affected list from the model inputs;
+> `jm_build_data(exclude_ambiguous_positivity = FALSE)` fits them anyway, and
+> `ambiguous_min_weeks = 2` tolerates a stray interior week instead of losing the season.
+> **If the answer is "zero detections", the right fix is upstream — read the absent row as 0 — and
+> these exclusions should be reverted, recovering 110 panel weeks.**
+
 ## Abstract
 
 We fit weekly influenza-positive ILI consultations from twelve EU/EEA countries over eight seasons
@@ -57,7 +86,7 @@ estimates; no parameter is allowed to vary in more than one direction at a time.
 
 ## Parameters
 
-| Parameter | Varies | Count (12 countries, 8 seasons) | Meaning |
+| Parameter | Varies | Count (12 countries, 8 seasons, 84 country-seasons) | Meaning |
 |---|---|---|---|
 | `R0_s` | between seasons, same across countries | 8 | transmissibility of that season's virus at full susceptibility |
 | `delta_s` | between seasons, same across countries, averages zero | 8 (7 free) | that season's positive consultations per infection, relative to normal |
@@ -66,11 +95,13 @@ estimates; no parameter is allowed to vary in more than one direction at a time.
 | `c_c` | between countries, same across seasons | 12 | positive consultations per infection |
 | `off_c,young`, `off_c,eld` | between countries and age groups | 24 | age offsets on reporting, adults the reference |
 | `phi_c` | between countries | 12 | negative-binomial dispersion of the weekly counts |
-| `b_c,src` | between countries and data sources present | 22 | off-season floor, per data source |
-| `I0_c,s` | freely between country-seasons | 86 | seed size, i.e. arrival time of that wave |
+| `b_c,src` | between countries and data sources present | 21 | off-season floor, per data source (CZ has only RespiCompass once its single ERVISS season is excluded) |
+| `I0_c,s` | freely between country-seasons | 84 | seed size, i.e. arrival time of that wave |
 
-Total about 184, of which 16 are shared across countries and 168 are local to one country. The
+Total **181**, of which 16 are shared across countries and 165 are local to one country. The
 likelihood is therefore separable given the shared block, which is what the fitting strategy exploits.
+(Without the provisional positivity-encoding exclusion it is 86 country-seasons and 184 parameters —
+`jm_build_data(exclude_ambiguous_positivity = FALSE)`; both designs are pinned by the test suite.)
 
 ## What the data layer does and does not support (audited 2026-09-16)
 

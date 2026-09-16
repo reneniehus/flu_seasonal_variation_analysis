@@ -30,6 +30,51 @@ stitch_covid_seasons <- c("2019/2020", "2020/2021", "2021/2022", "2022/2023")
   erviss_only = c("SK", "LV")                            # single source = ERVISS
 )
 
+# ---- |-A DATA-QUALITY FLAG: weeks whose influenza positivity cannot be computed ----
+#
+# THIS NEEDS CONFIRMATION FROM SURVEILLANCE COLLEAGUES. The question below is about what ECDC's
+# publication format MEANS, not about our code, and we are guessing.
+#
+# The raw ERVISS typing files encode a week with no influenza detections in TWO different ways:
+#   - 2083 sentinel (1068 non-sentinel) weeks state `detections = 0` explicitly;
+#   - 271 sentinel (438 non-sentinel) weeks report `tests > 0` with the detections row simply ABSENT.
+# Our positivity is re-derived as detections/tests, so the first becomes an observed zero and the
+# second becomes NA -- and an NA ILI+ week is DELETED by the stitch. Because the season grid ends at
+# the last finite week, a trailing run of them SHORTENS the season rather than leaving holes, with
+# nothing reporting it: CZ 2024/2025 ends at week 36 against 41-53 for its other seasons, so that
+# season contains no off-season at all and its ERVISS baseline is fitted without one.
+#
+# The two readings are:
+#   (a) an omitted detections row MEANS zero detections (consistent with the thousands of weeks that
+#       say 0 explicitly) -- then these weeks are observed zeros and none should be dropped;
+#   (b) it means the count is genuinely unknown for that week -- then dropping is right, but the
+#       trailing-run truncation is still wrong and should leave holes instead.
+# Which it is determines what the model is fitted to, so it is not ours to decide. Until it is
+# settled, jm_build_data EXCLUDES the affected country-seasons (owner, 2026-09-16) -- the
+# conservative choice, since it neither invents zeros nor fits a season on a truncated window.
+#
+# Returns one row per affected country-season, on the positivity stream that country's ILI+ actually
+# uses, so a non-sentinel country is judged on its non-sentinel file. A pure function of models_in.
+erviss_encoding_ambiguous <- function(models_in){
+  r <- .stitch_rules
+  x <- models_in$data_timeseries_long %>%
+    filter(pathogen == "Influenza", agegroup == "age_total",
+           indicator %in% c("detections", "tests"),
+           stream %in% c("typing_sentinel", "typing_nonsentinel")) %>%
+    select(country_short, season, season_week, stream, indicator, value) %>%
+    tidyr::pivot_wider(names_from = indicator, values_from = value)
+  if (!all(c("detections", "tests") %in% names(x))) return(x[0, c("country_short", "season")])
+  x %>%
+    # judge each country on the stream its own ILI+ is built from (.stitch_rules$nonsentinel)
+    mutate(used = ifelse(country_short %in% r$nonsentinel, "typing_nonsentinel", "typing_sentinel")) %>%
+    filter(stream == used,
+           is.finite(tests), tests > 0, is.na(detections)) %>%   # tests happened, count not published
+    group_by(country_short, season) %>%
+    summarise(n_ambiguous = dplyr::n(),
+              first_week = min(season_week), last_week = max(season_week), .groups = "drop") %>%
+    arrange(desc(n_ambiguous))
+}
+
 # ---- |-week-level stitched values for one or more age groups (the shared core) ----
 # Applies the source rules per week and age group; the per-country alignment factor is ALWAYS
 # estimated on the age TOTAL (the panel's definition) and applied to every band, so age-specific
