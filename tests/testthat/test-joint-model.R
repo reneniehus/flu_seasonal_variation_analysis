@@ -451,7 +451,10 @@ test_that("every figure in the default set actually renders", {
   # the data-overview and mechanism figures. The mechanism figure computes its curves from the model's
   # own C++ at perturbed parameter vectors, so it cannot drift from the model -- but it does index
   # specific parameter slots, so a layout change must fail here rather than mislabel a panel.
-  bp <- function(p) expect_s3_class(patchwork::patchworkGrob(p), "gtable")
+  # patchworkGrob opens a graphics device, which drops an Rplots.pdf in the test directory; render to
+  # a throwaway device instead so the test leaves nothing behind
+  bp <- function(p) { pdf(NULL); on.exit(dev.off(), add = TRUE)
+                      expect_s3_class(patchwork::patchworkGrob(p), "gtable") }
   build(plot_jm_data_panel(small)); bp(plot_jm_data_features(small)); bp(plot_jm_mechanism(small))
   # with intervals, which is how the report is written
   build(plot_jm_design(small)); build(plot_jm_arrival(small))

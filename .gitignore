@@ -32,3 +32,4 @@ output/*-forecast-hub/
 packrat/lib*/
 output/comp_model/
 output/joint_model/
+Rplots.pdf
