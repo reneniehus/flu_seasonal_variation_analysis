@@ -180,9 +180,13 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   const double ve_spread= as<double>(d["ve_spread"]);
   const double rate_per = as<double>(d["rate_per"]);
   const int    vax_day  = as<int>(d["vax_day"]);
-  const double R0_fixed = as<double>(d["R0_fixed"]), S0_fixed = as<double>(d["S0_fixed"]);
-  const bool season_on_S0  = as<std::string>(d["season_on"])  == "S0";
-  const bool country_on_S0 = as<std::string>(d["country_on"]) == "S0";
+  // the switch fields default to the working model when absent, so a data object built before the
+  // switch existed (the cached fit) keeps evaluating as the S0/S0 model it is -- the same pattern as
+  // attack_weeks
+  const double R0_fixed = as<double>(d["R0_fixed"]);
+  const double S0_fixed = d.containsElementNamed("S0_fixed") ? as<double>(d["S0_fixed"]) : 0.75;
+  const bool season_on_S0  = !d.containsElementNamed("season_on")  || as<std::string>(d["season_on"])  == "S0";
+  const bool country_on_S0 = !d.containsElementNamed("country_on") || as<std::string>(d["country_on"]) == "S0";
   const double logit_S0_fixed = std::log(S0_fixed / (1.0 - S0_fixed)), log_R0_fixed = std::log(R0_fixed);
   // the season horizon the dynamics run to, so the attack rate does not depend on where a country's
   // surveillance series happens to stop. Absent (an older cached d) falls back to 0 = the old
@@ -297,7 +301,8 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
 static double shared_lp(const double* th, const List& d, int S){
   double lp = 0.0;
   // the season effect's prior sd depends on which scale it lives on
-  const double s_x = as<std::string>(d["season_on"]) == "S0" ? as<double>(d["pr_x_sd"]) : as<double>(d["pr_r_sd"]);
+  const bool season_on_S0 = !d.containsElementNamed("season_on") || as<std::string>(d["season_on"]) == "S0";
+  const double s_x = season_on_S0 ? as<double>(d["pr_x_sd"]) : as<double>(d["pr_r_sd"]);
   const double s_dev = as<double>(d["pr_delta_sd"]);
   double sum_x = 0.0, sum_d = 0.0;
   for (int s = 0; s < S - 1; ++s){ lp += dnorm_log(th[s], 0.0, s_x); sum_x += th[s]; }
@@ -367,7 +372,7 @@ double jm_loglik_cpp(NumericVector theta, List d){
   for (int ic = 0; ic < C; ++ic){
     const int base = off_country[ic], nsrc = n_src[ic];
     const IntegerVector mine = cs_of_country[ic];
-    if (as<std::string>(d["country_on"]) == "S0")
+    if (!d.containsElementNamed("country_on") || as<std::string>(d["country_on"]) == "S0")
          ll -= dnorm_log(th[base + 0], as<double>(d["pr_S0_mean"]),  as<double>(d["pr_S0_sd"]));
     else ll -= dnorm_log(th[base + 0], as<double>(d["pr_R0c_mean"]), as<double>(d["pr_R0c_sd"]));
     ll -= dnorm_log(th[base + 1], as<double>(d["pr_c_mean"]),  as<double>(d["pr_c_sd"]));
