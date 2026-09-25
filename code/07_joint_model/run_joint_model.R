@@ -42,13 +42,15 @@ if (fit$n_flat_unresolved > 0){
   print(fit$flat[fit$flat$flat, ], row.names = FALSE)
 }
 
-cat("\n--- uncertainty: curvature intervals ---\n")
-iv = jm_intervals(fit)
-print(head(iv[, c("parameter","estimate","lower","upper")], 20), row.names = FALSE)
-
+# identifiability FIRST: it computes the penalised Hessian, and the intervals are read off the same
+# matrix, so computing them in this order costs one Hessian instead of two (~5 minutes saved)
 cat("\n--- identifiability ---\n")
 id = jm_identifiability(fit)
 cat(sprintf("Hessians in %.0f s. Penalised Hessian positive definite: %s\n", id$seconds, id$post_pd))
+
+cat("\n--- uncertainty: curvature intervals (from the same Hessian) ---\n")
+iv = jm_intervals(fit, H_post = id$H_post)
+print(head(iv[, c("parameter","estimate","lower","upper")], 20), row.names = FALSE)
 cat(sprintf("likelihood-only spectrum: largest %.3g, smallest |eigenvalue| %.3g, ratio %.2g\n",
             max(abs(id$eig_lik)), min(abs(id$eig_lik)), id$flat_ratio))
 cat(sprintf("directions the data cannot see (|eig| < 1e-8 x largest): %d ; negative directions: %d\n",

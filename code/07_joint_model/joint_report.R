@@ -5,7 +5,7 @@
 #   HOW THE MODEL WORKS       03 what each parameter does to a wave, 04 what varies where,
 #                             05 how a wave's arrival is set
 #   WHAT DATA IT FITS         06 every country-season, 07 one country by age, 08 the noise budget
-#   WHAT IT LEARNS            09 season transmissibility, 10 season visibility, 11 country
+#   WHAT IT LEARNS            09 season susceptibility effect, 10 season visibility, 11 country
 #                             susceptibility, 12 reporting level, 13 age reporting, 14 attack rates
 #   WHETHER TO BELIEVE IT     15 data or prior, 16 recovery of a known truth
 # Every figure carries its own interpretation in the subtitle: what the quantity means, and what the
@@ -213,8 +213,10 @@ plot_jm_mechanism = function(fit, ref = NULL){
   cc = d$countries[ic]; ss = d$seasons[s_ix]
   base = d$off_country[ic]; nsrc = d$n_src[ic]
   nm = jm_par_names(d)
-  # index of each slot we perturb
-  j = list(R0 = s_ix, delta = if (s_ix <= S - 1L) S + s_ix else NA_integer_,
+  # index of each slot we perturb. x and delta are the FREE season slots, so the reference season
+  # must not be the last one (whose value is minus the sum of the others)
+  stopifnot(s_ix <= S - 1L)
+  j = list(x = s_ix, delta = S - 1L + s_ix,
            S0 = base + 1L, c = base + 2L, off_eld = base + 4L, phi = base + 5L,
            I0 = base + 5L + nsrc + d$cs_pos[i0] + 1L)
   N = d$N[[ic]]; per = d$rate_per / N
@@ -226,12 +228,12 @@ plot_jm_mechanism = function(fit, ref = NULL){
 
   # each panel: the reference curve plus one lower and one higher setting of a single parameter
   panels = list(
-    list(key = "R0  transmissibility of the season", lo = bump(j$R0, log(0.93)), hi = bump(j$R0, log(1.07)),
-         lab = c("-7%", "+7%"),
-         note = "Steeper AND taller, and it peaks earlier. A 7% move is enough to double the peak, which is how little of this the data need to see."),
-    list(key = "S0  susceptibility of the country", lo = bump(j$S0, -0.25), hi = bump(j$S0, 0.25),
-         lab = c("lower", "higher"),
-         note = "Does the SAME thing as R0: the two enter the rise rate as a product. See the bottom panel."),
+    list(key = "x_s  season effect on susceptibility", lo = bump(j$x, -0.25), hi = bump(j$x, 0.25),
+         lab = c("-0.25 logit", "+0.25 logit"),
+         note = "Steeper AND taller, and it peaks earlier: more people to infect this season, everywhere. R0 itself is fixed at 1.5."),
+    list(key = "S0_c  the country's susceptibility level", lo = bump(j$S0, -0.25), hi = bump(j$S0, 0.25),
+         lab = c("-0.25 logit", "+0.25 logit"),
+         note = "The SAME lever as x_s -- both add to logit S0 -- but this one moves all of the country's seasons together."),
     list(key = "I0  seed, i.e. when the wave arrives", lo = bump(j$I0, log(0.01)), hi = bump(j$I0, log(100)),
          lab = c("/100", "x100"),
          note = "Moves the wave sideways and changes nothing else. The only handle on timing."),
@@ -278,30 +280,38 @@ plot_jm_mechanism = function(fit, ref = NULL){
     .jm_theme(9) + theme(strip.text = element_text(face = "bold", size = 8.5),
                          plot.margin = margin(4, 8, 4, 4))
 
-  # the two exact trade-offs, each drawn as a pair that coincides
-  stopifnot(!is.na(j$delta))
-  t_R0S0 = bump(j$R0, log(1.25))                   # +25% R0 ...
-  t_R0S0[j$S0] = qlogis(plogis(th[j$S0]) / 1.25)   # ... with S0 divided by 1.25: product held
+  # THE IDENTIFIABILITY PANEL. Two questions the design has to answer from one wave:
+  #  LEFT  "a bigger season -- more susceptible, or more visible?" Raise x_s, then raise delta_s by
+  #        exactly enough to reach the SAME PEAK. Same height, different shape: the susceptible season
+  #        rises faster and peaks earlier, the visible one is the fitted curve scaled up. The rise rate
+  #        tells them apart, and with R0 fixed the rise rate is S0's alone to explain.
+  #  RIGHT the one exact tie that remains: reporting level x season visibility. Identical curves, so
+  #        the sum-to-zero constraint on delta is what separates them, not the data.
+  base_pk = max(mu_of(th)$value)
+  t_x = bump(j$x, 0.35); pk_x = max(mu_of(t_x)$value)
+  t_del = bump(j$delta, log(pk_x / base_pk))          # the delta that reaches the same peak
   t_cdel = bump(j$c, log(1.5)); t_cdel[j$delta] = th[j$delta] + log(1 / 1.5)
-  tr = rbind(cbind(mu_of(th),     set = "as fitted",                      pair = "R0 x S0 held constant"),
-             cbind(mu_of(t_R0S0), set = "R0 +25%, S0 /1.25",              pair = "R0 x S0 held constant"),
-             cbind(mu_of(th),     set = "as fitted",                      pair = "c x delta held constant"),
-             cbind(mu_of(t_cdel), set = "c +50%, visibility /1.5",        pair = "c x delta held constant"))
+  tr = rbind(cbind(mu_of(th),    set = "as fitted",                     pair = "same peak: susceptibility vs visibility"),
+             cbind(mu_of(t_x),   set = "x_s +0.35 (more susceptible)",  pair = "same peak: susceptibility vs visibility"),
+             cbind(mu_of(t_del), set = sprintf("delta_s +%.2f (more visible)", log(pk_x / base_pk)),
+                                                                        pair = "same peak: susceptibility vs visibility"),
+             cbind(mu_of(th),    set = "as fitted",                     pair = "c x delta held constant"),
+             cbind(mu_of(t_cdel), set = "c +50%, visibility /1.5",      pair = "c x delta held constant"))
+  tr$set = factor(tr$set, levels = unique(tr$set))
+  cols = c("grey30", .jm_blue, .jm_orange, "#C1541E"); names(cols) = levels(tr$set)
+  ltys = c("solid", "solid", "solid", "22"); names(ltys) = levels(tr$set)
   ptr = ggplot(tr %>% filter(value > 0.5), aes(week, value, colour = set, linetype = set)) +
     geom_line(linewidth = 1.1) +
     facet_wrap(~ pair, ncol = 2) +
     scale_y_log10() +
-    scale_colour_manual(values = c("as fitted" = "grey30", "R0 +25%, S0 /1.25" = "#C1541E",
-                                   "c +50%, visibility /1.5" = "#C1541E"), name = NULL) +
-    scale_linetype_manual(values = c("as fitted" = "solid", "R0 +25%, S0 /1.25" = "22",
-                                     "c +50%, visibility /1.5" = "22"), name = NULL) +
-    labs(title = "Why the sharing in the design is not optional",
-         subtitle = paste("Each panel holds a PRODUCT fixed and moves both of its factors; log scale, so the rise is a",
-                          "straight line. RIGHT: reporting level and season visibility give exactly the same curve --",
-                          "they are the same number to the data. LEFT: transmissibility and susceptibility give the same",
-                          "RISE and separate only at the peak, because susceptibility also sets how many people there",
-                          "are left to infect. So one wave pins their product and almost nothing else -- which is why",
-                          "susceptibility needs transmissibility shared across countries before it means anything.", sep = "\n"),
+    scale_colour_manual(values = cols, name = NULL) +
+    scale_linetype_manual(values = ltys, name = NULL) +
+    labs(title = "What one wave can and cannot tell apart",
+         subtitle = paste("Log scale, so an exponential rise is a straight line. LEFT: two ways to make a season bigger, tuned",
+                          "to the SAME peak. More susceptible (blue) rises faster and peaks earlier; more visible (orange) is the",
+                          "fitted curve scaled up. The rise rate separates them, and with R0 fixed the rise rate belongs to S0",
+                          "alone -- that is what makes the season decomposition identifiable. RIGHT: reporting level and season",
+                          "visibility give exactly the same curve; only the average-one constraint on visibility separates them.", sep = "\n"),
          x = "week of the season", y = "ILI+ per 100 000 (log scale)") +
     .jm_theme(9) + theme(legend.position = "top")
 
@@ -324,8 +334,8 @@ jm_design_spec = function(d){
   S = d$n_season; C = d$n_country
   tibble::tribble(
     ~group,        ~parameter,                  ~season, ~country, ~age, ~n,                       ~note,
-    "dynamics",    "R0  transmissibility",      TRUE,  FALSE, FALSE, S,           "one number per season for all of Europe",
-    "dynamics",    "S0  susceptibility",        FALSE, TRUE,  FALSE, C,           "one per country, same across its seasons",
+    "dynamics",    "S0_c  susceptibility level", FALSE, TRUE,  FALSE, C,           "one per country: its S0 at the average season",
+    "dynamics",    "x_s  season effect on S0",   TRUE,  FALSE, FALSE, S - 1L,      "one per season, added to every country's logit S0; average zero",
     "dynamics",    "sigma  elderly suscept.",   FALSE, FALSE, TRUE,  1,           "one number for everyone",
     "dynamics",    "I0  seed / arrival",        TRUE,  TRUE,  FALSE, d$n_cs,      "free for every wave: sets when it arrives",
     "observation", "c  reporting level",        FALSE, TRUE,  FALSE, C,           "one per surveillance system",
@@ -333,6 +343,7 @@ jm_design_spec = function(d){
     "observation", "off  age reporting",        FALSE, TRUE,  TRUE,  2 * C,       "adults the reference",
     "observation", "b  off-season baseline",    FALSE, TRUE,  FALSE, sum(d$n_src),"one per data source present",
     "observation", "phi  dispersion",           FALSE, TRUE,  FALSE, C,           "one per country",
+    "fixed",       "R0  transmissibility",      FALSE, FALSE, FALSE, 0L,          "1.5 everywhere: S0 is the sensor of how easily a season spread",
     "fixed",       "gamma  infectious period",  FALSE, FALSE, FALSE, 0L,          "3.6 days, from the literature",
     "fixed",       "vaccine effects (3)",       FALSE, FALSE, TRUE,  0L,          "fixed, 65+ pulse on 1 October",
     "fixed",       "contact matrix",            FALSE, TRUE,  TRUE,  0L,          "fixed, rescaled to spectral radius 1")
@@ -461,24 +472,30 @@ plot_jm_adequacy = function(fit){
 
 # ================= WHAT IT LEARNS =================
 
-# ---- |-06 season transmissibility ----
-plot_jm_season_R0 = function(fit, iv = NULL){
+# ---- |-09 season effect on susceptibility ----
+plot_jm_season_S0 = function(fit, iv = NULL){
   d = fit$d; s = jm_summary_season(fit)
   s$season = factor(s$season, levels = d$seasons)
-  ci = .jm_iv(iv, paste0("log_R0_", d$seasons)); if (!is.null(ci)) s = cbind(s, ci[, c("lower", "upper")])
-  g = ggplot(s, aes(season, R0, group = 1)) +
-    annotate("rect", xmin = -Inf, xmax = Inf, ymin = 1.5 * exp(-1.96 * d$pr_R0_sd),
-             ymax = 1.5 * exp(1.96 * d$pr_R0_sd), fill = .jm_blue, alpha = 0.10) +
-    geom_hline(yintercept = 1.5, linetype = "dashed", colour = "grey50")
+  # the interval is on x (logit shift); push it through the same map as the point, S0 at the median
+  # country level, so bar and point are on one scale
+  p = jm_unpack(fit$theta, d)
+  med_logit = median(vapply(p$country, function(q) qlogis(q$S0), numeric(1)))
+  ci = .jm_iv(iv, paste0("x_", d$seasons))
+  if (!is.null(ci)){ s$lower = plogis(med_logit + ci$lower); s$upper = plogis(med_logit + ci$upper) }
+  band = plogis(med_logit + c(-1.96, 1.96) * d$pr_x_sd)
+  g = ggplot(s, aes(season, S0_typical, group = 1)) +
+    annotate("rect", xmin = -Inf, xmax = Inf, ymin = band[1], ymax = band[2], fill = .jm_blue, alpha = 0.10) +
+    geom_hline(yintercept = plogis(med_logit), linetype = "dashed", colour = "grey50")
   if (!is.null(ci)) g = g + geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.12, colour = .jm_blue)
   g + geom_line(colour = .jm_blue, linewidth = 0.8) + geom_point(size = 3, colour = .jm_blue) +
-    geom_text(aes(label = sprintf("%.2f", R0)), vjust = -1.4, size = 3, colour = "grey20") +
-    labs(title = "What it learns, 1: how transmissible each season's virus was",
-         subtitle = paste0("R0 is how many people one case would infect in a fully susceptible population, given the age mixing.",
-                          "\nIt is ONE number per season for the whole of Europe, carried by every wave in that season. The shaded",
-                          "\nband is the prior's 95% range around 1.5 and the dashed line its centre, so movement away from the",
-                          "\ncentre is the data speaking against the prior's pull.", .jm_ivnote(iv)),
-         x = NULL, y = expression(R[0]~"of the season")) +
+    geom_text(aes(label = sprintf("%.3f", S0_typical)), vjust = -1.4, size = 3, colour = "grey20") +
+    labs(title = "What it learns, 1: how easily each season spread",
+         subtitle = paste0("The season effect on susceptibility, shown as the susceptible fraction a TYPICAL country had that",
+                          "\nseason (the median country level plus the season's shift). R0 is fixed at 1.5, so this is the model's",
+                          "\nonly sensor of how easily a season spread: a novel strain, waned immunity and a genuinely more",
+                          "\ntransmissible virus all land here. ONE shift per season for the whole of Europe. Shaded band is the",
+                          "\nprior's 95% range around the typical level, dashed line its centre.", .jm_ivnote(iv)),
+         x = NULL, y = "susceptible fraction, typical country") +
     .jm_theme() + theme(axis.text.x = element_text(angle = 30, hjust = 1))
 }
 
@@ -522,13 +539,12 @@ plot_jm_country_S0 = function(fit, iv = NULL){
     geom_text(aes(x = lab_at, label = sprintf("%.3f", S0)), hjust = -0.25, size = 3, colour = "grey20") +
     scale_x_continuous(limits = c(0, 1.15), breaks = seq(0, 1, 0.25)) +
     labs(title = "What it learns, 3: how susceptible each country was at the season start",
-         subtitle = paste0("S0 is the share of the population that could be infected on 1 August, held the same across that",
-                          "\ncountry's seasons. It is the project's target quantity, and it is identifiable here only because",
-                          "\ntransmissibility is shared across countries: fitted one country at a time, the two trade off almost",
-                          "\nperfectly and the answer comes from the prior. That cuts both ways, and it is the caveat to carry:",
-                          "\nif countries genuinely differ in transmissibility, the difference has nowhere to go but into S0. On",
-                          "\nsimulated data where countries' R0 really did differ by 10%, this RANKING fell from 0.97 to 0.09.",
-                          "\nSo read it as conditional on shared transmissibility, and trust the ranking over the absolute level.",
+         subtitle = paste0("Each country's susceptible fraction on 1 August at the AVERAGE season; the season effect is added to",
+                          "\nit on the logit scale, so seasons shift every country together. With R0 fixed at 1.5 this is",
+                          "\nidentified by the rise rate of each wave and nothing else trades against it. The caveat to carry:",
+                          "\nR0 is held equal in every country, so any real difference in transmissibility -- more elderly",
+                          "\ncontacts, denser mixing -- has nowhere to go but here. Read it as 'how easily influenza spreads in",
+                          "\nthis country', a composite, and trust the ranking over the absolute level.",
                           .jm_ivnote(iv)),
          x = "S0", y = NULL) + .jm_theme()
 }
@@ -637,7 +653,7 @@ plot_jm_recovery = function(rec, d, summ = NULL){
          "readRDS('output/joint_model/joint_recovery.rds')$local$rec")
   if (is.null(summ)) summ = jm_recovery_summary(rec, d)
   cmp = summ$comparison %>%
-    filter(family %in% c("R0 (season, shared)", "season deviation (shared)", "S0 (country)",
+    filter(family %in% c("S0 season effect (shared)", "season deviation (shared)", "S0 (country)",
                          "reporting c (country)", "elderly susceptibility (global)"))
   cov_txt = summ$by_family %>% filter(!is.na(coverage)) %>%
     summarise(m = median(coverage)) %>% pull(m)
@@ -663,8 +679,8 @@ plot_jm_recovery = function(rec, d, summ = NULL){
          subtitle = paste0("Data were simulated from the model itself, at a known parameter set, onto the REAL design: the same",
                           "\ncountries, seasons, observed weeks, missing cells and populations as the actual panel. Then the whole",
                           "\npipeline was refitted from scratch. Each point is one parameter in one replicate; the dashed line is",
-                          "\nperfect recovery. Season transmissibility rank correlation ",
-                          sprintf("%.2f", summ$rank_shared$spearman_med[summ$rank_shared$block == "R0 by season"][1]),
+                          "\nperfect recovery. Season susceptibility-effect rank correlation ",
+                          sprintf("%.2f", summ$rank_shared$spearman_med[summ$rank_shared$block == "S0 season effect"][1]),
                           ", susceptibility ranking ", sprintf("%.2f", summ$rank_S0_spearman),
                           ",\n95% interval coverage ", sprintf("%.0f%%", 100 * cov_txt),
                           ". Orange triangles are ", n_off, " estimate(s) that fell outside",
@@ -706,8 +722,8 @@ save_jm_report = function(fit, id = NULL, iv = NULL, rec = NULL, dir = "output/j
                        paste(d$countries, collapse = ", ")))
   put("08_noise_budget.png", plot_jm_adequacy(fit), 10, 5.8,
       "how well it fits, honestly: the noise the fit needed against the noise the data have")
-  put("09_season_R0.png", plot_jm_season_R0(fit, iv), 10, 6.0,
-      "what it learns: transmissibility of each season's virus, shared across countries")
+  put("09_season_S0.png", plot_jm_season_S0(fit, iv), 10, 6.0,
+      "what it learns: how easily each season spread (the season effect on susceptibility), shared across countries")
   put("10_season_visibility.png", plot_jm_season_visibility(fit, iv), 10, 6.0,
       "what it learns: how visible each season was per infection, shared across countries")
   put("11_country_S0.png", plot_jm_country_S0(fit, iv), 10, 6.4,

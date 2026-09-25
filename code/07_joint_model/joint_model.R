@@ -23,10 +23,18 @@ jm_settings = function(){
     gamma_per_day = 0.2777778,     # 3.6-day mean infectious period, from the project notes
     ve_inf = 0.25, ve_ili = 0.20, ve_spread = 0.20,
     rate_per = 1e5, vax_day = 62L, # the 65+ vaccination pulse, 1 October
+    # R0 IS FIXED, NOT FITTED (owner, 2026-09-25). Transmissibility and susceptibility enter the rise
+    # rate as a product, so one wave identifies only their product; pinning R0 from the literature
+    # makes S0 the single sensor of "how easily did this season spread here", and any real
+    # season-to-season transmissibility variation is absorbed into S0's season effect by design.
+    R0_fixed = 1.5,
     # priors, all on the unconstrained scale the fit works in
-    pr_R0_mean = log(1.5), pr_R0_sd = 0.15,   # widened from the pilot's 0.05: R0_s is now shared, so
-                                              # 86 waves inform 8 numbers and the data can carry it
-    pr_S0_mean = qlogis(0.75), pr_S0_sd = 1,
+    pr_x_sd = 0.5,                            # season effect on logit S0, centred on zero. At S0 ~ 0.8
+                                              # one sd is ~ +/-0.09 on S0 itself; wide enough for the
+                                              # data to dominate (contraction is reported), tight
+                                              # enough to close the S0 -> 1 escape
+    pr_S0_mean = qlogis(0.75), pr_S0_sd = 1,  # the COUNTRY level of logit S0 (the mean of the two-way
+                                              # decomposition lives here, not in a separate slot)
     pr_sigma_mean = 1, pr_sigma_sd = 0.5,     # log2 sigma_eld ~ N(1, .5): centre 2x, 95% band 1.0-4.0x
     pr_delta_sd = 0.5,                        # season observation deviation, constrained to average 0
     pr_off_sd = 1,                            # log2 age reporting offsets
@@ -162,7 +170,7 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
   n_src = vapply(srcs, length, integer(1))
   n_cs_of_country = vapply(cds, function(cd) length(cd$seasons), integer(1))
   n_local = 5L + n_src + n_cs_of_country                 # S0, c, 2 offsets, phi, baselines, seeds
-  n_shared = 2L * S                                      # S log-R0, S-1 free deviations, 1 log2 sigma
+  n_shared = 2L * S - 1L                                 # S-1 free x, S-1 free delta, 1 log2 sigma
   off_country = as.integer(cumsum(c(n_shared, head(n_local, -1))))   # 0-based starts
   n_par = as.integer(n_shared + sum(n_local))
 
@@ -219,6 +227,7 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
     rates = unlist(lapply(cds, `[[`, "rates"), recursive = FALSE),
     gamma = set$gamma_per_day, ve_inf = set$ve_inf, ve_ili = set$ve_ili,
     ve_spread = set$ve_spread, rate_per = set$rate_per, vax_day = set$vax_day,
+    R0_fixed = set$R0_fixed,
     # The DYNAMICS horizon, distinct from the observation windows. Each country-season is observed for
     # however long its surveillance series runs (33 to 53 weeks here), but the attack rate has to mean
     # the same thing in every cell to be comparable across them and against cohort evidence, so the
@@ -248,7 +257,7 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
 # ---- |-the parameter vector: names, index blocks, starting values ----
 jm_par_names = function(d){
   S = d$n_season
-  nm = c(paste0("log_R0_", d$seasons), paste0("delta_", head(d$seasons, S - 1)), "log2_sigma_eld")
+  nm = c(paste0("x_", head(d$seasons, S - 1)), paste0("delta_", head(d$seasons, S - 1)), "log2_sigma_eld")
   for (ic in seq_len(d$n_country)){
     cc = d$countries[ic]
     nm = c(nm, paste0(cc, c(":logit_S0", ":log_c", ":off_young", ":off_eld", ":log_phi")),
@@ -259,17 +268,17 @@ jm_par_names = function(d){
 }
 jm_blocks = function(d){
   S = d$n_season
-  list(shared = seq_len(2L * S),
+  list(shared = seq_len(2L * S - 1L),
        local = lapply(seq_len(d$n_country), function(ic) d$off_country[ic] + seq_len(d$n_local[ic])))
 }
 
 jm_theta0 = function(d, set = jm_settings()){
   th = numeric(d$n_par)
   S = d$n_season
-  th[seq_len(S)] = set$pr_R0_mean                       # all seasons at 1.5
-  th[S + seq_len(S - 1)] = 0                            # no season deviation
-  th[2L * S] = set$pr_sigma_mean                        # elderly susceptibility at 2x
-  r0 = set$gamma_per_day * (1.5 * 0.8 - 1)              # a plausible early growth rate, per day
+  th[seq_len(S - 1)] = 0                                # no season effect on susceptibility
+  th[S - 1L + seq_len(S - 1)] = 0                       # no season effect on visibility
+  th[2L * S - 1L] = set$pr_sigma_mean                   # elderly susceptibility at 2x
+  r0 = set$gamma_per_day * (set$R0_fixed * 0.8 - 1)     # a plausible early growth rate, per day
   for (ic in seq_len(d$n_country)){
     base = d$off_country[ic]
     ics = d$cs_of_country[[ic]] + 1L
@@ -586,15 +595,21 @@ jm_fit = function(d, theta0 = jm_theta0(d), max_sweeps = 15L, tol = 0.05, maxit_
 # ---- |-tidy the parameters ----
 jm_unpack = function(th, d){
   S = d$n_season
-  dev_free = th[S + seq_len(S - 1)]
-  out = list(R0 = setNames(exp(th[seq_len(S)]), d$seasons),
+  x_free = th[seq_len(S - 1)]; dev_free = th[S - 1L + seq_len(S - 1)]
+  x = c(x_free, -sum(x_free))
+  out = list(R0 = unname(d$R0_fixed),                              # fixed, reported for convenience
+             x = setNames(x, d$seasons),                            # season effect on logit S0
              delta = setNames(c(dev_free, -sum(dev_free)), d$seasons),
-             sigma_eld = unname(2^th[2L * S]))
+             sigma_eld = unname(2^th[2L * S - 1L]))
   cty = lapply(seq_len(d$n_country), function(ic){
     base = d$off_country[ic]; ics = d$cs_of_country[[ic]] + 1L
     # unname the scalars: they would otherwise carry the parameter's own label ("DK:logit_S0") and
-    # leak it into every data frame, summary column and plot label built from them
-    list(S0 = unname(plogis(th[base + 1])), c = unname(exp(th[base + 2])),
+    # leak it into every data frame, summary column and plot label built from them.
+    # S0 is the country's level at the AVERAGE season; S0_season is that country's actual S0 in each
+    # of its seasons, logit S0_c + x_s
+    list(S0 = unname(plogis(th[base + 1])),
+         S0_season = setNames(plogis(th[base + 1] + x[d$cs_season[ics] + 1L]), d$seasons[d$cs_season[ics] + 1L]),
+         c = unname(exp(th[base + 2])),
          off_young = unname(th[base + 3]), off_eld = unname(th[base + 4]),
          phi = unname(exp(th[base + 5])),
          b = setNames(exp(th[base + 5 + seq_len(d$n_src[ic])]), d$sources[[ic]]),
@@ -627,8 +642,11 @@ jm_summary_country = function(fit){
 jm_summary_season = function(fit){
   d = fit$d; p = jm_unpack(fit$theta, d)
   per = function(s, f) { ii = which(d$cs_season == s - 1L); f(ii) }
-  data.frame(season = d$seasons, R0 = unname(p$R0), deviation = unname(p$delta),
-             reporting_mult = exp(unname(p$delta)),
+  # S0_typical: the season's susceptibility for a typical country, i.e. at the median country level.
+  # This is the number to read: x is a logit shift and hard to picture on its own.
+  med_logit = median(vapply(p$country, function(q) qlogis(q$S0), numeric(1)))
+  data.frame(season = d$seasons, x = unname(p$x), S0_typical = plogis(med_logit + unname(p$x)),
+             deviation = unname(p$delta), reporting_mult = exp(unname(p$delta)),
              n_country = vapply(seq_len(d$n_season), function(s) per(s, length), integer(1)),
              obs_cells = vapply(seq_len(d$n_season), function(s)
                per(s, function(ii) sum(vapply(ii, function(i) sum(is.finite(d$y[[i]])), numeric(1)))), numeric(1)),
@@ -645,17 +663,17 @@ jm_summary_season = function(fit){
 # are right. tests/testthat/test-joint-model.R requires 1e-10.
 jm_negll_R = function(th, d){
   S = d$n_season; A = 3L
-  R0 = exp(th[seq_len(S)])
-  dev_free = th[S + seq_len(S - 1)]
+  x_free = th[seq_len(S - 1)]; xs = c(x_free, -sum(x_free))
+  dev_free = th[S - 1L + seq_len(S - 1)]
   dev = exp(c(dev_free, -sum(dev_free)))
-  sigma = c(1, 1, 2^th[2L * S])
+  sigma = c(1, 1, 2^th[2L * S - 1L])
   dn = function(x, m, s) -0.5 * ((x - m) / s)^2 - log(s) - 0.5 * log(2 * pi)
-  lp = sum(dn(th[seq_len(S)], d$pr_R0_mean, d$pr_R0_sd)) +
+  lp = sum(dn(xs, 0, d$pr_x_sd)) +
        sum(dn(c(dev_free, -sum(dev_free)), 0, d$pr_delta_sd)) +
-       dn(th[2L * S], d$pr_sigma_mean, d$pr_sigma_sd)
+       dn(th[2L * S - 1L], d$pr_sigma_mean, d$pr_sigma_sd)
   for (ic in seq_len(d$n_country)){
     base = d$off_country[ic]; nsrc = d$n_src[ic]
-    S0 = plogis(th[base + 1]); cc = exp(th[base + 2])
+    logitS0_c = th[base + 1]; cc = exp(th[base + 2])
     c_age = cc * 2^c(th[base + 3], 0, th[base + 4])
     phi = exp(th[base + 5])
     b = exp(th[base + 5 + seq_len(nsrc)])
@@ -665,7 +683,8 @@ jm_negll_R = function(th, d){
     N = d$N[[ic]]
     for (ics in d$cs_of_country[[ic]] + 1L){
       y = d$y[[ics]]; nw = nrow(y); s = d$cs_season[ics] + 1L
-      beta = R0[s] * d$gamma
+      beta = d$R0_fixed * d$gamma
+      S0 = plogis(logitS0_c + xs[s])                      # this country, this season
       Su = rep(S0, A); Iu = rep(I0v[d$cs_pos[ics] + 1L], A); Sv = rep(0, A); Iv = rep(0, A)
       vax = c(0, 0, d$vax_eld[ics]); inc = matrix(0, nw, A); day = 0L
       for (t in seq_len(nw)){
@@ -716,7 +735,7 @@ jm_identifiability = function(fit, verbose = TRUE){
   H_post = (H_post + t(H_post)) / 2; H_lik = (H_lik + t(H_lik)) / 2
   secs = as.numeric(difftime(Sys.time(), t0, units = "secs"))
   S = d$n_season
-  fam = ifelse(grepl("log_R0", nm), "R0 (season, shared)",
+  fam = ifelse(grepl("^x_", nm), "S0 season effect (shared)",
         ifelse(grepl("^delta_", nm), "season deviation (shared)",
         ifelse(grepl("log2_sigma", nm), "elderly susceptibility (global)",
         ifelse(grepl(":logit_S0", nm), "S0 (country)",
@@ -725,7 +744,7 @@ jm_identifiability = function(fit, verbose = TRUE){
         ifelse(grepl(":log_phi", nm), "dispersion phi",
         ifelse(grepl(":log_b_", nm), "baseline b",
         ifelse(grepl(":log_I0_", nm), "seed I0 (country-season)", nm)))))))))
-  pr_sd = ifelse(grepl("log_R0", nm), d$pr_R0_sd,
+  pr_sd = ifelse(grepl("^x_", nm), d$pr_x_sd,
           ifelse(grepl("^delta_", nm), d$pr_delta_sd,
           ifelse(grepl("log2_sigma", nm), d$pr_sigma_sd,
           ifelse(grepl(":logit_S0", nm), d$pr_S0_sd,
@@ -754,7 +773,10 @@ jm_identifiability = function(fit, verbose = TRUE){
        n_near_flat = sum(abs(e_lik) < 1e-8 * max(abs(e_lik))),
        n_negative = sum(e_lik < -1e-6 * max(abs(e_lik))),
        post_pd = all(e_post > 0), table = tab, family = as.data.frame(famtab),
-       sd_shared_cond = setNames(sd_shared_cond, nm[sh]))
+       sd_shared_cond = setNames(sd_shared_cond, nm[sh]),
+       # the penalised Hessian itself: ~5 minutes to compute and the basis of every interval and
+       # correlation downstream, so it travels with the result instead of being recomputed
+       H_post = H_post)
 }
 
 # ---- |-model adequacy: is the fitted dispersion explainable as MEASUREMENT noise? ----

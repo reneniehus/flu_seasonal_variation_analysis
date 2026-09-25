@@ -44,6 +44,17 @@ load(here::here("output/demography_respicast.Rdata")); demo <- obj
 d  <- withr::with_dir(here::here(), jm_build_data(c("DK", "EE"), models_in, demo, verbose = FALSE))
 th <- jm_theta0(d)
 
+# The cached 12-country fit, or NULL when it predates the CURRENT parameter layout. Tests that read
+# it must skip on NULL rather than hand a stale theta to the C++, which indexes by the new layout and
+# either aborts or scores garbage. The layout changed on 2026-09-25 (R0 fixed; shared block 2S-1).
+.jm_cached <- local({
+  f <- here::here("output/joint_model/joint_fit.rds")
+  if (!file.exists(f)) return(NULL)
+  o <- readRDS(f)
+  ok <- !is.null(o$fit$d$R0_fixed) && length(o$fit$theta) == length(jm_par_names(o$fit$d))
+  if (isTRUE(ok)) o else NULL
+})
+
 test_that("the C++ log-posterior equals the base-R reference of the same model", {
   expect_equal(jm_negll_cpp(th, d), jm_negll_R(th, d), tolerance = 1e-10)
   set.seed(11)
@@ -60,10 +71,12 @@ test_that("the C++ log-posterior equals the base-R reference of the same model",
 test_that("every parameter slot is read back as its name says, and the deviations average zero", {
   probe <- seq_len(d$n_par) / 100; names(probe) <- jm_par_names(d)
   p <- jm_unpack(probe, d); S <- d$n_season
-  expect_equal(unname(log(p$R0)), unname(probe[seq_len(S)]))
-  expect_equal(unname(p$delta[seq_len(S - 1)]), unname(probe[S + seq_len(S - 1)]))
+  expect_equal(unname(p$x[seq_len(S - 1)]), unname(probe[seq_len(S - 1)]))
+  expect_equal(sum(p$x), 0, tolerance = 1e-12)                # season effect on S0 averages zero
+  expect_equal(p$R0, jm_settings()$R0_fixed)                  # R0 is fixed, reported for convenience
+  expect_equal(unname(p$delta[seq_len(S - 1)]), unname(probe[S - 1L + seq_len(S - 1)]))
   expect_equal(sum(p$delta), 0, tolerance = 1e-12)            # the constraint that removes the pilot's flat direction
-  expect_equal(log2(p$sigma_eld), unname(probe[2L * S]))
+  expect_equal(log2(p$sigma_eld), unname(probe[2L * S - 1L]))
   for (ic in seq_len(d$n_country)){
     b <- d$off_country[ic]; q <- p$country[[ic]]
     expect_equal(qlogis(q$S0), unname(probe[b + 1]))
@@ -131,12 +144,13 @@ test_that("the driver truth constructor really encodes the driver effect it clai
   S <- d$n_season
   x <- seq_len(S) %% 2
   set.seed(9)
-  tt <- jm_truth_with_driver(d, x, beta_R0 = 0.10, beta_delta = 0.40, noise_R0 = 0, noise_delta = 0)
+  tt <- jm_truth_with_driver(d, x, beta_x = 0.10, beta_delta = 0.40, noise_x = 0, noise_delta = 0)
   dr <- attr(tt, "driver")
-  expect_equal(dr$beta_R0, 0.10); expect_equal(dr$beta_delta, 0.40)
+  expect_equal(dr$beta_x, 0.10); expect_equal(dr$beta_delta, 0.40)
   # with the noise switched off, regressing the truth back on the covariate returns the slopes exactly
-  expect_equal(unname(coef(lm(tt[seq_len(S)] ~ dr$x))[2]), 0.10, tolerance = 1e-8)
   p <- jm_unpack(tt, d)
+  expect_equal(unname(coef(lm(p$x ~ dr$x))[2]), 0.10, tolerance = 1e-8)
+  expect_equal(sum(p$x), 0, tolerance = 1e-10)
   expect_equal(unname(coef(lm(p$delta ~ dr$x))[2]), 0.40, tolerance = 1e-8)
   expect_equal(sum(p$delta), 0, tolerance = 1e-10)         # the constraint still holds
 })
@@ -148,8 +162,9 @@ test_that("curvature intervals contain the estimate and cover the constrained de
   expect_true(all(iv$lower <= iv$estimate + 1e-9))
   expect_true(all(iv$estimate <= iv$upper + 1e-9))
   # every free parameter, plus one extra row for the deviation that is minus the sum of the others
-  expect_equal(nrow(iv), length(small$theta) + 1L)
+  expect_equal(nrow(iv), length(small$theta) + 2L)   # x_last AND delta_last are both derived rows
   expect_true(paste0("delta_", d$seasons[d$n_season]) %in% iv$parameter)
+  expect_true(paste0("x_", d$seasons[d$n_season]) %in% iv$parameter)
 })
 
 test_that("the flat-line protector detects a flat fit, escapes it, and leaves a healthy one alone", {
@@ -157,8 +172,8 @@ test_that("the flat-line protector detects a flat fit, escapes it, and leaves a 
   # collapses, the negative binomial becomes diffuse enough that any curve fits, and the country sits
   # at its baseline for every season. It cost the Netherlands in the first joint fit and a harder
   # search later found a solution 406 nats better, so it is an optimiser failure, not a fact.
-  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
-  fit <- readRDS(here::here("output/joint_model/joint_fit.rds"))$fit
+  skip_if(is.null(.jm_cached), "no saved fit, or it predates this parameter layout")
+  fit <- .jm_cached$fit
   dd <- fit$d; bl <- jm_blocks(dd)
 
   # (a) the detector must not fire on a healthy fit, and with real margin, not marginally
@@ -199,8 +214,8 @@ test_that("the flat-line protector detects a flat fit, escapes it, and leaves a 
 test_that("the data-implied dispersion is one definition used everywhere", {
   # jm_phi_data feeds the adequacy diagnostic, the multi-start and the protector; if the three ever
   # disagree the noise-budget figure stops meaning what it says
-  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
-  fit <- readRDS(here::here("output/joint_model/joint_fit.rds"))$fit
+  skip_if(is.null(.jm_cached), "no saved fit, or it predates this parameter layout")
+  fit <- .jm_cached$fit
   phid <- jm_phi_data(fit$d)
   expect_length(phid, fit$d$n_country)
   expect_true(all(is.finite(phid) & phid > 0))
@@ -230,9 +245,9 @@ test_that("the C++ and R implementations agree where the pool cap BINDS, not jus
 test_that("a rejected parameter vector is rejected by every entry point, not scored", {
   S <- d$n_season
   bad <- list(
-    "sigma overflows"  = local({ t <- th; t[2L * S] <- 1030; t }),
-    "R0 overflows"     = local({ t <- th; t[seq_len(S)] <- 800; t[grep(":log_I0", names(th))] <- -800; t }),
-    "one R0 overflows" = local({ t <- th; t[1] <- 800; t }))
+    "sigma overflows"  = local({ t <- th; t[2L * S - 1L] <- 1030; t }),
+    "delta overflows"  = local({ t <- th; t[S - 1L + seq_len(S - 1)] <- 800; t[grep(":log_I0", names(th))] <- -800; t }),
+    "one delta overflows" = local({ t <- th; t[S] <- 800; t }))
   for (nm in names(bad)){
     t2 <- bad[[nm]]
     # the objective must return its sentinel, never a finite value that looks like a better fit
@@ -258,8 +273,8 @@ test_that("every exported entry point checks the length of theta before reading 
 })
 
 test_that("a PARTIAL flat line is detected and rescued, and a low-attack design is not false-flagged", {
-  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
-  fit <- readRDS(here::here("output/joint_model/joint_fit.rds"))$fit
+  skip_if(is.null(.jm_cached), "no saved fit, or it predates this parameter layout")
+  fit <- .jm_cached$fit
   dd <- fit$d; bl <- jm_blocks(dd)
   ic <- which(dd$countries == "NL"); if (!length(ic)) ic <- 1L
   i_seed <- bl$local[[ic]][5L + dd$n_src[ic] + seq_len(dd$n_cs_of_country[ic])]
@@ -333,7 +348,7 @@ test_that("every figure's error bar is bound to the parameter it is drawn agains
   # the interval table's own estimate must equal the quantity each figure plots, on that figure's
   # scale -- this is what says the back-transform in the figure matches the one in jm_intervals
   pick <- function(n) iv[match(n, iv$parameter), ]
-  expect_equal(pick(paste0("log_R0_", d$seasons))$estimate, ss$R0, tolerance = 1e-8)
+  expect_equal(pick(paste0("x_", d$seasons))$estimate, ss$x, tolerance = 1e-8)
   expect_equal(exp(pick(paste0("delta_", d$seasons))$estimate), ss$reporting_mult, tolerance = 1e-8)
   expect_equal(pick(paste0(d$countries, ":logit_S0"))$estimate, s$S0, tolerance = 1e-8)
   expect_equal(pick(paste0(d$countries, ":log_c"))$estimate, s$c_adult, tolerance = 1e-8)
@@ -460,11 +475,11 @@ test_that("every figure in the default set actually renders", {
   build(plot_jm_design(small)); build(plot_jm_arrival(small))
   build(plot_jm_fit_overview(small)); build(plot_jm_fit_country(small, d$countries[1]))
   build(plot_jm_adequacy(small)); build(plot_jm_attack(small))
-  for (p in list(plot_jm_season_R0(small, iv), plot_jm_season_visibility(small, iv),
+  for (p in list(plot_jm_season_S0(small, iv), plot_jm_season_visibility(small, iv),
                  plot_jm_country_S0(small, iv), plot_jm_country_reporting(small, iv),
                  plot_jm_age_offsets(small, iv))) build(p)
   # and WITHOUT intervals, the other branch of every one of those five
-  for (p in list(plot_jm_season_R0(small), plot_jm_season_visibility(small),
+  for (p in list(plot_jm_season_S0(small), plot_jm_season_visibility(small),
                  plot_jm_country_S0(small), plot_jm_country_reporting(small),
                  plot_jm_age_offsets(small))) build(p)
 })
@@ -495,15 +510,16 @@ test_that("the default design is the documented one, and the attack rate is a se
   # because the small designs used above all have 8 seasons and never exercise the default.
   cand <- c("DK", "EE", "ES", "FR", "NO", "BE", "CZ", "IE", "IT", "PL", "HR", "NL")
   # TWO documented designs, and both are pinned. Without the positivity-encoding exclusion the
-  # min_seasons = 5 decision gives 12 / 86 / 184; with it (the default since 2026-09-16, provisional
+  # min_seasons = 5 decision gives 12 / 86 / 183; with it (the default since 2026-09-16, provisional
   # pending surveillance confirmation) CZ 2024/2025 is dropped and CZ loses the ERVISS baseline slot
-  # that had no off-season behind it, giving 12 / 85 / 182.
+  # that had no off-season behind it, giving 12 / 85 / 181. (R0 fixed since 2026-09-25: the
+  # shared block is 2S-1, one slot shorter than when R0_s was fitted.)
   full <- withr::with_dir(here::here(),
             jm_build_data(cand, models_in, demo, verbose = FALSE,
                           exclude_ambiguous_positivity = FALSE))
-  expect_equal(c(full$n_country, full$n_cs, full$n_par), c(12L, 86L, 184L))
+  expect_equal(c(full$n_country, full$n_cs, full$n_par), c(12L, 86L, 183L))
   dd <- withr::with_dir(here::here(), jm_build_data(cand, models_in, demo, verbose = FALSE))
-  expect_equal(c(dd$n_country, dd$n_cs, dd$n_par), c(12L, 85L, 182L))
+  expect_equal(c(dd$n_country, dd$n_cs, dd$n_par), c(12L, 85L, 181L))
   expect_true("ES" %in% dd$countries)            # the country the min_seasons decision was about
   expect_equal(dd$n_season, 8L)                  # no season is lost entirely by the exclusion
   # the dynamics horizon is a full season for every cell, and the observation windows are not
@@ -512,8 +528,8 @@ test_that("the default design is the documented one, and the attack rate is a se
   # THE GUARANTEE: running the dynamics past the observation window must not touch the likelihood.
   # Checked on whichever design the cached fit's theta actually belongs to -- the shipped fit uses the
   # exclusion, but the check is meaningful on either, so pick by length rather than assuming.
-  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
-  fit0 <- readRDS(here::here("output/joint_model/joint_fit.rds"))$fit
+  skip_if(is.null(.jm_cached), "no saved fit, or it predates this parameter layout")
+  fit0 <- .jm_cached$fit
   dref <- if (length(fit0$theta) == dd$n_par) dd else full
   skip_if_not(length(fit0$theta) == dref$n_par, "cached fit predates both layouts")
   d_short <- dref; d_short$attack_weeks <- 0L    # the old behaviour
@@ -625,7 +641,7 @@ test_that("the ambiguous positivity encoding is detected and its seasons exclude
   expect_equal(length(jm_par_names(with_ex)), with_ex$n_par)
   bl <- jm_blocks(with_ex)
   expect_equal(sort(c(bl$shared, unlist(bl$local))), seq_len(with_ex$n_par))
-  expect_equal(with_ex$n_par, 2L * with_ex$n_season + sum(with_ex$n_local))
+  expect_equal(with_ex$n_par, 2L * with_ex$n_season - 1L + sum(with_ex$n_local))
   expect_true(is.finite(jm_negll_cpp(jm_theta0(with_ex), with_ex)))
   for (ic in seq_len(with_ex$n_country))   # a source slot must never survive without data
     expect_equal(with_ex$n_src[ic],
@@ -661,10 +677,10 @@ test_that("the shared priors are counted once, not once per country", {
   parts <- sum(vapply(seq_len(d$n_country), function(ic) jm_country_negll_cpp(th, d, ic - 1L), numeric(1)))
   S <- d$n_season
   dn <- function(x, m, s) -0.5 * ((x - m) / s)^2 - log(s) - 0.5 * log(2 * pi)
-  dev_free <- th[S + seq_len(S - 1)]
-  expected <- -(sum(dn(th[seq_len(S)], d$pr_R0_mean, d$pr_R0_sd)) +
+  x_free <- th[seq_len(S - 1)]; dev_free <- th[S - 1L + seq_len(S - 1)]
+  expected <- -(sum(dn(c(x_free, -sum(x_free)), 0, d$pr_x_sd)) +
                 sum(dn(c(dev_free, -sum(dev_free)), 0, d$pr_delta_sd)) +
-                dn(th[2L * S], d$pr_sigma_mean, d$pr_sigma_sd))
+                dn(th[2L * S - 1L], d$pr_sigma_mean, d$pr_sigma_sd))
   expect_equal(unname(nl - parts), unname(expected), tolerance = 1e-8)
 })
 
@@ -688,11 +704,14 @@ test_that("no fitted slot is left without a prior", {
   # and the curvature must be the prior sd the settings declare, slot by slot
   expect_equal(curv[grep("log_I0", jm_par_names(d))][1], -1 / d$pr_I0_sd^2, tolerance = 1e-6)
   expect_equal(curv[grep("logit_S0", jm_par_names(d))][1], -1 / d$pr_S0_sd^2, tolerance = 1e-6)
-  expect_equal(curv[1], -1 / d$pr_R0_sd^2, tolerance = 1e-6)          # log_R0 of season 1
+  # a free season-effect slot also drives the constrained last member (minus the sum), so its
+  # log-prior curvature is -2/sd^2: its own term plus the constrained term's dependence on it
+  expect_equal(curv[1], -2 / d$pr_x_sd^2, tolerance = 1e-6)                 # x of season 1
+  expect_equal(curv[d$n_season], -2 / d$pr_delta_sd^2, tolerance = 1e-6)    # delta of season 1
   # and the contraction denominator must be the sd the C++ actually applied, per family
-  skip_if_not(file.exists(here::here("output/joint_model/joint_fit.rds")), "no saved fit")
-  fam <- readRDS(here::here("output/joint_model/joint_fit.rds"))$id$family
-  want <- c("R0 (season, shared)" = d$pr_R0_sd, "S0 (country)" = d$pr_S0_sd,
+  skip_if(is.null(.jm_cached), "no saved fit, or it predates this parameter layout")
+  fam <- .jm_cached$id$family
+  want <- c("S0 season effect (shared)" = d$pr_x_sd, "S0 (country)" = d$pr_S0_sd,
             "reporting c (country)" = d$pr_c_sd, "season deviation (shared)" = d$pr_delta_sd,
             "dispersion phi" = d$pr_phi_sd, "baseline b" = d$pr_b_sd,
             "age reporting offset" = d$pr_off_sd, "seed I0 (country-season)" = d$pr_I0_sd,
@@ -707,14 +726,14 @@ test_that("the elderly susceptibility redistributes infection without changing t
   # the AGE COMPOSITION of cases, not by the size of the wave. Documented in MODEL.md; asserted here.
   S <- d$n_season
   rho_of <- function(theta){
-    sigma <- c(1, 1, 2^theta[2L * S])
+    sigma <- c(1, 1, 2^theta[2L * S - 1L])
     vapply(seq_len(d$n_country), function(ic){
       Cs <- sweep(d$Cn[[ic]], 1, sigma, "*")
       max(abs(eigen(Cs / max(abs(eigen(Cs, only.values = TRUE)$values)), only.values = TRUE)$values))
     }, numeric(1))
   }
   for (shift in c(-2, 0, 2)){
-    t2 <- th; t2[2L * S] <- th[2L * S] + shift
+    t2 <- th; t2[2L * S - 1L] <- th[2L * S - 1L] + shift
     expect_equal(unname(rho_of(t2)), rep(1, d$n_country), tolerance = 1e-9)
   }
   expect_equal(unname(vapply(d$Cn, function(m) max(abs(eigen(m, only.values = TRUE)$values)), numeric(1))),

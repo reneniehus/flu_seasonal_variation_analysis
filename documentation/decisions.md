@@ -867,3 +867,45 @@ known dispersion; determinism across core counts.
 **Operational note.** Long R runs are unreliable in this container -- the 12-country Hessian stage and
 a 4-replicate recovery run were both killed part-way. The fit (120 s) and the Hessians (314 s) complete
 when run alone; budget accordingly and re-run rather than trusting a partial artefact.
+
+## 2026-09-25 -- R0 fixed; susceptibility and reporting each get a season AND a country effect
+
+**Owner decision.** `R0` is fixed at 1.5, not fitted: transmissibility and susceptibility enter the
+rise rate as a product and are indistinguishable from one wave, so one of them is pinned and `S0`
+becomes the single sensor of how easily a season spread. `S0` then carries both a country level and a
+season effect: `logit S0_{c,s} = S0_c + x_s`, with `x_s` centred on zero and constrained to average
+zero. Reporting keeps the same structure it already had: `log c_{c,s} = c_c + delta_s`. The age
+effects are unchanged.
+
+**Why the mean lives in the country level rather than in a separate slot.** The owner's
+`mean + x[season] + y[country]` with both centred on zero is equivalent to a country level whose prior
+is centred on the plausible value (`qlogis(0.75)` for `S0`, `log 0.05` for `c`) plus a zero-centred
+season effect. Keeping it that way, with no sum-to-zero across countries, preserves the block
+separability of the likelihood -- each country's block stays independent given the shared block --
+which is what makes the fit run in two minutes. Same identification, one fewer constraint to carry.
+
+**What this returns to.** The project's founding decision (top of this file) was exactly this: fix R0
+from the literature, fit S0 per season. The joint model had moved the season effect into a fitted
+`R0_s` because sharing it across countries was what made a per-country `S0_c` identifiable. Fixing R0
+outright achieves the same identification more simply -- with R0 pinned, the rise rate is `S0`'s
+alone to explain -- at the price the founding decision already accepted: any real transmissibility
+variation, between seasons (subtype) or between countries (demography, mixing), is absorbed into `S0`
+as "more susceptible". `S0_c` and `x_s` are composite indices of how easily influenza spread, and
+MODEL.md now says so in its own section on what the contact matrix and the pyramid do and do not do.
+
+**What changed in the code.** Shared block is now `x_s` (S-1 free), `delta_s` (S-1 free),
+`log2 sigma_eld`: 15 slots, one fewer than before. `d$R0_fixed` replaces the `log_R0_s` block and its
+prior; `pr_x_sd = 0.5` on the logit scale is the season-effect prior. `jm_intervals` now derives both
+constrained last members by the delta method. The recovery harness's driver hook moves `x_s` instead
+of `log R0_s`; the `r0_by_country` violation scales the fixed R0 per country, which now measures
+directly how far `S0_c` is a composite. The C++ and the base-R reference still agree to 1e-10. Design:
+12 countries, 8 seasons, 85 country-seasons, **181 parameters** (183 without the positivity exclusion).
+
+**Identifiability, the theory (the data side is in MODEL.md).** With R0 fixed, each wave's rise rate
+`gamma (R0 S0 - 1)` identifies `S0_{c,s}` outright; its final size then follows from `S0_{c,s}`, so the
+peak height identifies `c_{c,s}`; the seed identifies timing. The two-way decompositions are ordinary
+additive designs on 85 cells with 7 + 12 free effects each -- 66 residual degrees of freedom, well
+identified. The one question the design has to answer from shape alone is "a bigger season: more
+susceptible or more visible?", and it can: a susceptibility effect makes the wave rise faster and peak
+earlier, a visibility effect scales it. The exact tie that remains is `c_c x delta_s`, broken by the
+average-one constraint, not by the data.

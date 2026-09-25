@@ -18,7 +18,7 @@ One page. What it assumes, why it is simpler than the compartmental pilot, and w
 > because CZ's detections feed went dark on 2025-03-26). **PL 2024/2025 is kept**: its single affected
 > week sits among neighbours with 0 detections over 114 tests, so it is almost certainly a real zero.
 >
-> The design is therefore **12 countries, 8 seasons, 85 country-seasons, 182 parameters**. All 12
+> The design is therefore **12 countries, 8 seasons, 85 country-seasons, 181 parameters**. All 12
 > countries and all 8 seasons survive. CZ also loses its ERVISS baseline slot, because 2024/2025 was
 > its only ERVISS season — the right outcome, since that slot was otherwise fitted with no off-season
 > behind it.
@@ -33,7 +33,7 @@ One page. What it assumes, why it is simpler than the compartmental pilot, and w
 
 We fit weekly influenza-positive ILI consultations from **twelve EU/EEA countries over eight seasons —
 85 country-seasons, 8 685 observed age-week cells — with a single age- and vaccination-structured SIR,
-estimated jointly in 182 parameters**. Three age groups (0-14, 15-64, 65+) mix by each country's
+estimated jointly in 181 parameters**. **R0 is fixed at 1.5 from the literature, not fitted.** Three age groups (0-14, 15-64, 65+) mix by each country's
 contact matrix, rescaled so its dominant eigenvalue is one, which makes a season's basic reproduction
 number the realised R0 given that mixing rather than an artefact of the contact data's absolute scale.
 The elderly susceptibility re-weights that matrix and the result is **rescaled again**, so `sigma_eld`
@@ -47,19 +47,23 @@ fixed 53-week horizon, with a single vaccination pulse into the 65+ group on 1 O
 for convenience. Observed ILI+ levels differ more than a hundredfold between countries and each country
 keeps its rank across seasons, so the level has to be a **country** property — a reporting proportion —
 not an epidemiological one. Seasons rise and fall **together** across Europe once that country level is
-divided out, which is what licenses one transmissibility and one visibility per season. So
-transmissibility `R0_s` is assumed to **vary between seasons and be the same across countries**;
-initial susceptibility `S0_c` to **vary between countries and be the same across that country's
-seasons**; and the elderly's relative susceptibility per contact is **assumed the same everywhere**,
-one number, because it is biology rather than surveillance.
+divided out, which is what licenses one Europe-wide season effect on each quantity. Transmissibility
+and susceptibility enter a wave's rise rate as a **product** and are indistinguishable from one wave,
+so one of them is pinned: `R0` is fixed and **susceptibility is the single sensor of how easily a
+season spread**. It is decomposed additively on the logit scale into a **country level** `S0_c`
+(varying between countries, the same across that country's seasons) and a **season effect** `x_s`
+(varying between seasons, the same across countries, constrained to average zero). The elderly's
+relative susceptibility per contact is **assumed the same everywhere**, one number, because it is
+biology rather than surveillance.
 
-On the observation side the reporting proportion is assumed to **vary between countries** and, through
-two offsets, **between age groups within a country**, but to be **the same across that country's
-seasons** apart from one Europe-wide deviation per season **constrained to average zero**. The two
-constraints are not cosmetic: within a single country-season, transmissibility and susceptibility enter
-the rise rate as a **product**, and reporting level and season visibility enter the observation as a
-**product**, so each pair is exactly indistinguishable from one wave alone. Sharing `R0_s` across
-countries breaks the first tie and the average-one constraint breaks the second — **that is the reason
+The reporting proportion has exactly the same structure on the log scale: a **country level** `c_c`,
+a **season effect** `delta_s` constrained to average zero, and two age offsets **varying between
+countries** because how readily children and the elderly are seen is surveillance, not biology. The
+average-zero constraints are not cosmetic: reporting level and season visibility enter the observation
+as a **product** and are the same number to the data, so the constraint is what separates them. The
+question the design must answer from shape alone — *a bigger season: more susceptible, or more
+visible?* — it can: a susceptibility effect makes the wave rise faster and peak earlier, a visibility
+effect only scales it, and with `R0` fixed the rise rate is `S0`'s alone to explain. **That is why
 this is a joint fit rather than 85 separate ones.** The seed size is left to **vary freely between
 country-seasons**: it is the model's only handle on when a wave arrives, and the observed peak spans 14
 weeks across the panel, so it cannot be shared.
@@ -96,34 +100,84 @@ does not.
   every deviation by the same factor, a direction measured at eigenvalue 1e-7 against 1e5 in all twelve
   countries, and with the deviations now shared that one direction would slide all twelve country
   levels together.
-- **Susceptibility is un-entangled by construction.** `R0_s` is shared, so it is pinned by 86 waves and
-  can no longer absorb a country's `S0`. Measured gain from the pilot: a 50-fold sharpening in the
-  likelihood-only precision of `logit S0`.
+- **Susceptibility is un-entangled by construction.** `R0` is fixed, so nothing trades against `S0` in
+  the rise rate: each wave's early growth identifies its `S0_{c,s}` outright. (The earlier joint model
+  achieved this by sharing a fitted `R0_s` across countries — a 50-fold sharpening over the pilot;
+  fixing `R0` keeps that identification with one parameter fewer and the founding caveat made explicit.)
 - **Baseline slots are built from the sources a country actually has**, and carry a weak prior. In the
   pilot two slots were created unconditionally; Spain and Norway have no ERVISS seasons, so their
   second slot had zero curvature from data or prior and the Hessian was exactly singular.
-- **The `R0_s` prior is widened** from sd 0.05 to 0.15. In the pilot the tight prior was what broke the
-  susceptibility entanglement, so the reported S0 intervals were largely inherited from it. Sharing
-  `R0_s` does that job with data instead.
+- **No transmissibility prior at all.** In the pilot a tight `R0_s` prior was what broke the
+  susceptibility entanglement, so the reported `S0` intervals were largely inherited from it. With `R0`
+  pinned there is nothing to inherit: `S0`'s intervals come from the rise rates.
 
 ## Parameters
 
 | Parameter | Varies | Count (12 countries, 8 seasons, 85 country-seasons) | Meaning |
 |---|---|---|---|
-| `R0_s` | between seasons, same across countries | 8 | transmissibility of that season's virus at full susceptibility |
-| `delta_s` | between seasons, same across countries, averages zero | 8 (7 free) | that season's positive consultations per infection, relative to normal |
+| `S0_c` | between countries; the country's level at the average season | 12 | susceptible fraction on 1 August, logit scale |
+| `x_s` | between seasons, same across countries, averages zero | 8 (7 free) | season effect on susceptibility, added to every country's logit `S0_c` |
+| `c_c` | between countries; the country's level at the average season | 12 | positive consultations per infection, log scale |
+| `delta_s` | between seasons, same across countries, averages zero | 8 (7 free) | season effect on visibility, added to every country's log `c_c` |
 | `sigma_eld` | nothing: one global value | 1 | elderly susceptibility per contact, relative to adults |
-| `S0_c` | between countries, same across seasons and ages | 12 | susceptible fraction at season start |
-| `c_c` | between countries, same across seasons | 12 | positive consultations per infection |
 | `off_c,young`, `off_c,eld` | between countries and age groups | 24 | age offsets on reporting, adults the reference |
 | `phi_c` | between countries | 12 | negative-binomial dispersion of the weekly counts |
 | `b_c,src` | between countries and data sources present | 21 | off-season floor, per data source (CZ has only RespiCompass once its single ERVISS season is excluded) |
 | `I0_c,s` | freely between country-seasons | 85 | seed size, i.e. arrival time of that wave |
 
-Total **182**, of which 16 are shared across countries and 166 are local to one country. The
+So the two quantities the project reads are each a **two-way additive decomposition**: on the logit
+scale `logit S0_{c,s} = S0_c + x_s`, and on the log scale `log c_{c,s} = c_c + delta_s`. The country
+levels carry the mean (their priors are centred on the plausible level, not on zero); the season
+effects are centred on zero and constrained to average zero, which is what makes the level and the
+effects separately identified rather than sliding against each other.
+
+Total **181**, of which 15 are shared across countries and 166 are local to one country. The
 likelihood is therefore separable given the shared block, which is what the fitting strategy exploits.
-(Without the provisional positivity-encoding exclusion it is 86 country-seasons and 184 parameters —
+(Without the provisional positivity-encoding exclusion it is 86 country-seasons and 183 parameters —
 `jm_build_data(exclude_ambiguous_positivity = FALSE)`; both designs are pinned by the test suite.)
+
+## R0 in a country: what the contact matrix, the age susceptibility and the pyramid do, and do not do
+
+**R0 is fixed at 1.5 in every country and every season** (owner decision, 2026-09-25). This section is
+the honest account of what that means once age mixing enters, because it is easy to believe the
+model has a country-specific R0 when it does not.
+
+**How the dynamics are built.** Each country has its own contact matrix `C_c` (Prem et al., collapsed
+to three groups with that country's population weights, so the pyramid already shapes it). It is
+rescaled to spectral radius one. The elderly susceptibility `sigma_eld` then multiplies the elderly
+row, and the result is **rescaled to spectral radius one again**. The force of infection uses
+`beta = R0 x gamma` on that matrix. Consequence: the realised reproduction number at full
+susceptibility is **exactly 1.5 in every country**, whatever its matrix, its pyramid, or `sigma_eld`.
+
+**What the matrix, `sigma_eld` and the pyramid therefore control.** *Who* gets infected, not *how
+many*. They set the age distribution of infections and the age-specific attack rates — the elderly
+attack rate is 21% against 33% for adults precisely because of this structure — but they cannot move
+the overall speed of the epidemic. That is delivered entirely by `S0_{c,s} x R0`, and with `R0`
+pinned, by `S0_{c,s}` alone.
+
+**The consequence the owner asked about, stated plainly.** In reality a country with a larger share of
+elderly, who are ~2x as susceptible per contact, or with denser mixing, *has* a higher effective
+transmissibility. The model erases that difference by renormalising, so wherever it is real it has
+**nowhere to go but the country's `S0_c`**. `S0_c` is therefore a composite: genuine susceptibility
+plus whatever transmissibility differences the demography and mixing would have produced. The same
+holds across seasons for `x_s`: a genuinely more transmissible strain (H3N2 over H1N1) lands in `x_s`
+as "more susceptible". This is the project's founding caveat (`decisions.md`, "Fix R0 from the
+literature") and it is now the design rather than an aside. **Read `S0_c` and `x_s` as "how easily
+influenza spread here / this season", not as a pure immunity measure.**
+
+**On the visibility side the age structure IS country-specific, correctly.** Age-specific reporting
+(`off_c,young`, `off_c,eld`) varies by country, and the pyramid enters the expected count through the
+group populations `N_a`, so a country with more elderly sees more elderly consultations. What the
+model does **not** have is age-specific *season* visibility: `delta_s` scales every age group by the
+same factor, so an H3N2 season that is disproportionately visible in the elderly is represented only
+in aggregate. A natural extension, not a defect.
+
+**The alternative, for a later model comparison.** Skip the second renormalisation. Then the realised
+R0 in country `c` is `1.5 x rho(D_sigma C_c)`, which varies by country through *known* demography and
+mixing — a mechanistically-determined transmissibility — leaving `S0_c` a purer susceptibility
+residual. It is a one-line change in the C++ and it changes what `sigma_eld` means (raising it would
+then raise overall transmissibility too). Worth fitting side by side once the learning layer starts;
+not done now, so that one thing changes at a time.
 
 ## What the data layer does and does not support (audited 2026-09-16)
 
@@ -162,7 +216,7 @@ exclusion, is in the box at the top of this file and in
 
 ## Fixed, not fitted
 
-`gamma = 1/3.6` per day; `ve_inf = 0.25`, `ve_ili_cond_inf = 0.20`, `ve_spread = 0.20`; vaccination
+`R0 = 1.5` everywhere (see the section above); `gamma = 1/3.6` per day; `ve_inf = 0.25`, `ve_ili_cond_inf = 0.20`, `ve_spread = 0.20`; vaccination
 pulse on season day 62 into 65+ only, at the reported national coverage; the contact matrix, rescaled
 to spectral radius one, and re-rescaled after the elderly susceptibility re-weights it, so `R0_s` is
 independent of `sigma_eld` (verified); no waning, no ageing, no importation
@@ -220,8 +274,9 @@ replicates: roughly 1-2% per country-fit, and detectable rather than silent.
 `run_joint_recovery.R`, 18 full refits on the real 12-country design. Data simulated from the model
 itself at a known parameter set, then the whole pipeline refitted from scratch.
 
-**Measured on the 86-country-season design**, before the positivity-encoding exclusion removed CZ
-2024/2025. These are structural results about the estimator -- rank recovery, interval coverage, and
+**Measured under the PREVIOUS model (`R0_s` fitted per season, `S0_c` per country) on the
+86-country-season design**, before the positivity-encoding exclusion and before `R0` was fixed. These
+are structural results about the estimator -- rank recovery, interval coverage, and
 whether a known driver effect survives the two-step procedure -- and one country-season out of 86 does
 not overturn them; but the numbers below have not been re-measured on the 85-cell design, and figure
 16 is not regenerated until `run_joint_recovery.R` is run again.

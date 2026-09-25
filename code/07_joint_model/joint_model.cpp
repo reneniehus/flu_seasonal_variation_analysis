@@ -15,13 +15,23 @@
 // infectious every week) and is cheap to keep while the C++ has no derivatives to get wrong.
 //
 // Parameter vector layout (all on unconstrained scales), mirrored by jm_pack/jm_unpack in R:
-//   [0 .. S-1]         log R0_s                      one per season, shared across countries
-//   [S .. 2S-2]        delta_s, s = 1..S-1           season observation deviation, free values
+//   [0 .. S-2]         x_s, s = 1..S-1               season effect on SUSCEPTIBILITY, logit scale,
+//                                                    free values; x_S = -sum(free), so they average zero
+//   [S-1 .. 2S-3]      delta_s, s = 1..S-1           season effect on VISIBILITY, log scale, free values;
 //                                                    delta_S = -sum(free), i.e. they average zero
-//   [2S-1]             log2 sigma_eld                one global elderly susceptibility
+//   [2S-2]             log2 sigma_eld                one global elderly susceptibility
 //   then per country c, starting at off_country[c]:
-//   +0                 logit S0_c
-//   +1                 log c_c
+//   +0                 logit S0_c   the country's susceptibility at the average season;
+//                                   logit S0_{c,s} = logit S0_c + x_s
+//   +1                 log c_c      the country's reporting level at the average season;
+//                                   log c_{c,s} = log c_c + delta_s
+//
+// R0 IS FIXED (d["R0_fixed"], 1.5), not fitted. Transmissibility and susceptibility enter the rise
+// rate as a product and are indistinguishable from one wave, so one of them has to be pinned; with
+// R0 pinned from the literature, S0 becomes the single "how easily did this season spread here"
+// sensor, and its two-way decomposition into a country level and a season effect is what the joint
+// fit identifies (MODEL.md). Any genuine season-to-season variation in transmissibility is
+// therefore absorbed into x_s -- a composite index, by design.
 //   +2                 off_young                     log2 reporting offset vs adults
 //   +3                 off_eld
 //   +4                 log phi_c
@@ -127,27 +137,28 @@ static inline double dnorm_log(double x, double m, double s){
   return -0.5 * z * z - std::log(s) - 0.5 * LOG_2PI;
 }
 
-// ---- |-the shared block: R0_s, the season deviations, the global elderly susceptibility ----
+// ---- |-the shared block: the two season effects and the global elderly susceptibility ----
 struct Shared {
-  std::vector<double> R0, dev;                  // dev[s] = exp(delta_s), the reporting multiplier
-  double sigma_eld;
+  std::vector<double> xs, dev;                  // xs[s]: logit-scale season effect on S0;
+  double sigma_eld;                             // dev[s] = exp(delta_s), the reporting multiplier
 };
 // finiteness of the TRANSFORMED shared values. theta = 800 is a finite number whose exp() is Inf,
 // which then produced Inf*0 = NaN inside the dynamics, so checking theta alone is not enough.
 static inline bool shared_ok(const Shared& sh){
   if (!R_finite(sh.sigma_eld) || sh.sigma_eld <= 0.0) return false;
-  for (size_t s = 0; s < sh.R0.size(); ++s)
-    if (!R_finite(sh.R0[s]) || sh.R0[s] < 0.0 || !R_finite(sh.dev[s]) || sh.dev[s] < 0.0) return false;
+  for (size_t s = 0; s < sh.xs.size(); ++s)
+    if (!R_finite(sh.xs[s]) || !R_finite(sh.dev[s]) || sh.dev[s] < 0.0) return false;
   return true;
 }
 
 static inline Shared read_shared(const double* th, int S){
-  Shared sh; sh.R0.resize(S); sh.dev.resize(S);
-  double sum_free = 0.0;
-  for (int s = 0; s < S; ++s) sh.R0[s] = std::exp(th[s]);
-  for (int s = 0; s < S - 1; ++s){ const double d = th[S + s]; sh.dev[s] = std::exp(d); sum_free += d; }
-  sh.dev[S - 1] = std::exp(-sum_free);          // the sum-to-zero constraint, in the log scale
-  sh.sigma_eld = std::exp2(th[2 * S - 1]);
+  Shared sh; sh.xs.resize(S); sh.dev.resize(S);
+  double sum_x = 0.0, sum_d = 0.0;
+  for (int s = 0; s < S - 1; ++s){ sh.xs[s] = th[s]; sum_x += th[s]; }
+  sh.xs[S - 1] = -sum_x;                        // the sum-to-zero constraint, on the logit scale
+  for (int s = 0; s < S - 1; ++s){ const double dd = th[S - 1 + s]; sh.dev[s] = std::exp(dd); sum_d += dd; }
+  sh.dev[S - 1] = std::exp(-sum_d);             // the sum-to-zero constraint, on the log scale
+  sh.sigma_eld = std::exp2(th[2 * S - 2]);
   return sh;
 }
 
@@ -162,6 +173,7 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   const double ve_spread= as<double>(d["ve_spread"]);
   const double rate_per = as<double>(d["rate_per"]);
   const int    vax_day  = as<int>(d["vax_day"]);
+  const double R0_fixed = as<double>(d["R0_fixed"]);   // the ONE transmissibility, not fitted
   // the season horizon the dynamics run to, so the attack rate does not depend on where a country's
   // surveillance series happens to stop. Absent (an older cached d) falls back to 0 = the old
   // behaviour, which keeps a stale object readable rather than erroring on it.
@@ -179,8 +191,9 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   const IntegerVector mine = cs_of_country[ic];
   const int base = off_country[ic], nsrc = n_src[ic];
 
-  // local parameters
-  const double S0    = 1.0 / (1.0 + std::exp(-th[base + 0]));
+  // local parameters. logit S0_c is the country's level at the AVERAGE season; the season effect
+  // x_s is added per country-season below, so S0 differs between this country's seasons.
+  const double logitS0_c = th[base + 0];
   const double c_c   = std::exp(th[base + 1]);
   const double oy    = th[base + 2], oe = th[base + 3];
   const double phi   = std::exp(th[base + 4]);
@@ -191,7 +204,7 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   double c_age[A];
   c_age[0] = c_c * std::exp2(oy);  c_age[1] = c_c;  c_age[2] = c_c * std::exp2(oe);
 
-  // the contact matrix with the age susceptibilities, renormalised so R0_s keeps its meaning
+  // the contact matrix with the age susceptibilities, renormalised so R0 keeps its meaning
   double Cs[A][A];
   const double sig[A] = {1.0, 1.0, sh.sigma_eld};
   for (int a = 0; a < A; ++a) for (int j = 0; j < A; ++j) Cs[a][j] = sig[a] * Cn(a, j);
@@ -214,7 +227,8 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
     const NumericMatrix y = y_list[ics];
     const int nw = y.nrow();
     const int s  = cs_season[ics];
-    const double beta = sh.R0[s] * gamma;
+    const double beta = R0_fixed * gamma;
+    const double S0 = 1.0 / (1.0 + std::exp(-(logitS0_c + sh.xs[s])));   // this country, this season
     const double I0 = std::exp(logI0[cs_pos[ics]]);
     const double b  = std::exp(logb[cs_src[ics]]);
     const double dev = sh.dev[s];
@@ -264,15 +278,17 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
 }
 
 // ---- |-priors on the shared block ----
+// Both season-effect sets are centred on zero, and the CONSTRAINED last member of each is penalised
+// too, so all S values of each set sit under the same prior.
 static double shared_lp(const double* th, const List& d, int S){
   double lp = 0.0;
-  const double m_R0 = as<double>(d["pr_R0_mean"]), s_R0 = as<double>(d["pr_R0_sd"]);
-  const double s_dev = as<double>(d["pr_delta_sd"]);
-  for (int s = 0; s < S; ++s) lp += dnorm_log(th[s], m_R0, s_R0);
-  double sum_free = 0.0;
-  for (int s = 0; s < S - 1; ++s){ lp += dnorm_log(th[S + s], 0.0, s_dev); sum_free += th[S + s]; }
-  lp += dnorm_log(-sum_free, 0.0, s_dev);                 // the constrained last deviation
-  lp += dnorm_log(th[2 * S - 1], as<double>(d["pr_sigma_mean"]), as<double>(d["pr_sigma_sd"]));
+  const double s_x = as<double>(d["pr_x_sd"]), s_dev = as<double>(d["pr_delta_sd"]);
+  double sum_x = 0.0, sum_d = 0.0;
+  for (int s = 0; s < S - 1; ++s){ lp += dnorm_log(th[s], 0.0, s_x); sum_x += th[s]; }
+  lp += dnorm_log(-sum_x, 0.0, s_x);
+  for (int s = 0; s < S - 1; ++s){ lp += dnorm_log(th[S - 1 + s], 0.0, s_dev); sum_d += th[S - 1 + s]; }
+  lp += dnorm_log(-sum_d, 0.0, s_dev);
+  lp += dnorm_log(th[2 * S - 2], as<double>(d["pr_sigma_mean"]), as<double>(d["pr_sigma_sd"]));
   return lp;
 }
 
@@ -356,8 +372,8 @@ List jm_fitted_cpp(NumericVector theta, List d){
   const double* th = theta.begin();
   const Shared sh = read_shared(th, S);
   if (!shared_ok(sh))
-    stop("cannot compute fitted values: the shared block is not usable (R0, the season deviations "
-         "or the elderly susceptibility is non-finite or negative)");
+    stop("cannot compute fitted values: the shared block is not usable (a season effect or the "
+         "elderly susceptibility is non-finite or negative)");
   const List cs_of_country = d["cs_of_country"];
   const int n_cs = as<int>(d["n_cs"]);
   List mu_all(n_cs); NumericMatrix attack_all(n_cs, A);
@@ -371,8 +387,8 @@ List jm_fitted_cpp(NumericVector theta, List d){
       for (int a = 0; a < A; ++a) attack_all(mine[m], a) = at(m, a);
     }
   }
-  NumericVector R0(S), dev(S);
-  for (int s = 0; s < S; ++s){ R0[s] = sh.R0[s]; dev[s] = sh.dev[s]; }
+  NumericVector xs(S), dev(S);
+  for (int s = 0; s < S; ++s){ xs[s] = sh.xs[s]; dev[s] = sh.dev[s]; }
   return List::create(_["mu"] = mu_all, _["attack"] = attack_all,
-                      _["R0"] = R0, _["dev"] = dev, _["sigma_eld"] = sh.sigma_eld);
+                      _["x"] = xs, _["dev"] = dev, _["sigma_eld"] = sh.sigma_eld);
 }

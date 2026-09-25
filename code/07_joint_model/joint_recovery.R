@@ -43,7 +43,7 @@ suppressMessages({library(dplyr); library(tidyr)})
 # expensive curvature computation when it does not need intervals. Every transform is monotone, so
 # pushing interval endpoints through it is exact for quantiles.
 jm_par_kind = function(nm)
-  ifelse(grepl("^log_R0", nm), "exp",
+  ifelse(grepl("^x_", nm), "identity",
   ifelse(grepl("^delta_", nm), "identity",
   ifelse(grepl("^log2_sigma", nm), "pow2",
   ifelse(grepl(":logit_S0", nm), "plogis",
@@ -70,17 +70,22 @@ jm_intervals = function(fit, H_post = NULL, level = 0.95){
              estimate = jm_par_tr(unname(th), kind), lower = jm_par_tr(unname(lo_u), kind),
              upper = jm_par_tr(unname(hi_u), kind),
              row.names = NULL, stringsAsFactors = FALSE)
-  # The LAST season deviation is not a free parameter: it is minus the sum of the others, so the
-  # sum-to-zero constraint holds. Its interval needs the delta method, i.e. the variance of that sum,
-  # which is the total of the whole covariance sub-block rather than a single diagonal entry.
-  S = d$n_season; jf = S + seq_len(S - 1)
+  # The LAST member of each season-effect set is not a free parameter: it is minus the sum of the
+  # others, so the sum-to-zero constraint holds. Its interval needs the delta method, i.e. the
+  # variance of that sum, which is the total of the whole covariance sub-block rather than a single
+  # diagonal entry. Two such sets now: x (susceptibility) at [1..S-1], delta (visibility) at [S..2S-2].
+  S = d$n_season
   if (!is.null(V)){
-    se_last = sqrt(max(sum(V[jf, jf, drop = FALSE]), 0))
-    th_last = -sum(th[jf])
-    out = rbind(out, data.frame(parameter = paste0("delta_", d$seasons[S]), kind = "identity",
-                                theta = th_last, se = se_last, estimate = th_last,
-                                lower = th_last - z * se_last, upper = th_last + z * se_last,
-                                row.names = NULL, stringsAsFactors = FALSE))
+    for (blk in list(list(prefix = "x_", jf = seq_len(S - 1)),
+                     list(prefix = "delta_", jf = S - 1L + seq_len(S - 1)))){
+      jf = blk$jf
+      se_last = sqrt(max(sum(V[jf, jf, drop = FALSE]), 0))
+      th_last = -sum(th[jf])
+      out = rbind(out, data.frame(parameter = paste0(blk$prefix, d$seasons[S]), kind = "identity",
+                                  theta = th_last, se = se_last, estimate = th_last,
+                                  lower = th_last - z * se_last, upper = th_last + z * se_last,
+                                  row.names = NULL, stringsAsFactors = FALSE))
+    }
   }
   out
 }
@@ -160,10 +165,11 @@ jm_truth_from_prior = function(d, set = jm_settings(), anchor = NULL){
   # wide prior would put the wave outside the observation window and test nothing.
   th = if (is.null(anchor)) jm_theta0(d, set) else anchor
   S = d$n_season
-  th[seq_len(S)] = rnorm(S, set$pr_R0_mean, set$pr_R0_sd)
-  dev = rnorm(S, 0, set$pr_delta_sd); dev = dev - mean(dev)          # respect the sum-to-zero constraint
-  th[S + seq_len(S - 1)] = dev[seq_len(S - 1)]
-  th[2L * S] = rnorm(1, set$pr_sigma_mean, set$pr_sigma_sd)
+  xs = rnorm(S, 0, set$pr_x_sd); xs = xs - mean(xs)                  # both season-effect sets average zero
+  th[seq_len(S - 1)] = xs[seq_len(S - 1)]
+  dev = rnorm(S, 0, set$pr_delta_sd); dev = dev - mean(dev)
+  th[S - 1L + seq_len(S - 1)] = dev[seq_len(S - 1)]
+  th[2L * S - 1L] = rnorm(1, set$pr_sigma_mean, set$pr_sigma_sd)
   for (ic in seq_len(d$n_country)){
     b = d$off_country[ic]
     th[b + 1] = rnorm(1, set$pr_S0_mean, set$pr_S0_sd)
@@ -179,20 +185,21 @@ jm_truth_from_prior = function(d, set = jm_settings(), anchor = NULL){
 # THE LEARNING-LAYER HOOK. x is one covariate value per season (subtype, vaccine effectiveness,
 # prior-season burden, ...). The truth is built so that the covariate REALLY DOES move the season
 # parameter by a known amount, on the model's own scale:
-#   log R0_s     = pr_R0_mean   + beta_R0  * x_s + noise
-#   delta_s      = beta_delta * x_s + noise, then centred to average zero
-# Running the pipeline on this and regressing the FITTED season parameters back on x recovers
-# beta_R0 and beta_delta if and only if the two-step procedure is trustworthy.
-jm_truth_with_driver = function(d, x, beta_R0 = 0, beta_delta = 0, set = jm_settings(),
-                                noise_R0 = 0.03, noise_delta = 0.15, anchor = NULL){
+#   x_s      = beta_x     * z_s + noise, then centred to average zero   (season effect on logit S0)
+#   delta_s  = beta_delta * z_s + noise, then centred to average zero   (season effect on log c)
+# Running the pipeline on this and regressing the FITTED season parameters back on z recovers
+# beta_x and beta_delta if and only if the two-step procedure is trustworthy.
+jm_truth_with_driver = function(d, x, beta_x = 0, beta_delta = 0, set = jm_settings(),
+                                noise_x = 0.10, noise_delta = 0.15, anchor = NULL){
   stopifnot(length(x) == d$n_season)
   th = if (is.null(anchor)) jm_theta0(d, set) else anchor
-  S = d$n_season; xs = as.numeric(scale(x))
-  th[seq_len(S)] = set$pr_R0_mean + beta_R0 * xs + rnorm(S, 0, noise_R0)
-  dev = beta_delta * xs + rnorm(S, 0, noise_delta); dev = dev - mean(dev)
-  th[S + seq_len(S - 1)] = dev[seq_len(S - 1)]
+  S = d$n_season; zs = as.numeric(scale(x))
+  xs = beta_x * zs + rnorm(S, 0, noise_x); xs = xs - mean(xs)
+  th[seq_len(S - 1)] = xs[seq_len(S - 1)]
+  dev = beta_delta * zs + rnorm(S, 0, noise_delta); dev = dev - mean(dev)
+  th[S - 1L + seq_len(S - 1)] = dev[seq_len(S - 1)]
   names(th) = jm_par_names(d)
-  attr(th, "driver") = list(x = xs, beta_R0 = beta_R0, beta_delta = beta_delta)
+  attr(th, "driver") = list(x = zs, beta_x = beta_x, beta_delta = beta_delta)
   th
 }
 
@@ -230,10 +237,11 @@ jm_simulate = function(theta, d, seed = NULL){
 # model reproduced it perfectly and the arm tested nothing. A violation must break something no
 # parameter can mop up -- `jm_violation_is_real` checks that, and the test suite enforces it.
 #
-#   r0_by_country  each country gets its own transmissibility multiplier. This is the assumption the
-#                  whole design rests on (sharing R0_s across countries is what makes S0_c
-#                  identifiable), and R0 changes the wave's SHAPE, so no reporting parameter can
-#                  absorb it. sd_log_r0 = 0.10 means countries spanning roughly 0.84-1.20.
+#   r0_by_country  each country gets its own transmissibility multiplier on the FIXED R0. With R0
+#                  pinned, a real between-country difference in transmissibility can only land in
+#                  the country's S0 level -- so this arm measures how far S0_c is a composite of
+#                  susceptibility and transmissibility, which is the design's stated caveat.
+#                  sd_log_r0 = 0.10 means countries spanning roughly 0.84-1.20.
 #   second_wave    a Gaussian bump late in the season. A single-wave SIR cannot make two humps at any
 #                  parameter value. Applied identically to every season, so it degrades FIT without
 #                  biasing the between-season contrasts -- which is itself worth knowing.
@@ -244,13 +252,13 @@ jm_simulate_violation = function(theta, d, violation = c("none", "r0_by_country"
   if (!is.null(seed)) set.seed(seed)
   p = jm_unpack(theta, d); ds = d
   rmul = if (violation == "r0_by_country") exp(rnorm(d$n_country, 0, sd_log_r0)) else rep(1, d$n_country)
-  # a per-country R0 has to enter the DYNAMICS, so the model is re-run per country with that country's
-  # shared R0 block shifted -- not patched onto mu afterwards, which would be a reporting effect
+  # a per-country R0 has to enter the DYNAMICS, so the model is re-run per country with the FIXED R0
+  # scaled for that country -- not patched onto mu afterwards, which would be a reporting effect
   mu_all = vector("list", d$n_cs)
   if (violation == "r0_by_country"){
     for (ic in seq_len(d$n_country)){
-      th2 = theta; th2[seq_len(d$n_season)] = theta[seq_len(d$n_season)] + log(rmul[ic])
-      f2 = jm_fitted_cpp(th2, d)
+      d2 = d; d2$R0_fixed = d$R0_fixed * rmul[ic]
+      f2 = jm_fitted_cpp(theta, d2)
       for (i in (d$cs_of_country[[ic]] + 1L)) mu_all[[i]] = f2$mu[[i]]
     }
   } else mu_all = jm_fitted_cpp(theta, d)$mu
@@ -342,7 +350,7 @@ jm_recovery = function(d, truth_fn = function(i) jm_truth_from_fit(fit0), n_rep 
 # ---- |-what the replicates say: bias, error, rank recovery, coverage ----
 jm_recovery_summary = function(rec, d){
   cmp = rec$comparison
-  fam = function(nm) ifelse(grepl("^log_R0", nm), "R0 (season, shared)",
+  fam = function(nm) ifelse(grepl("^x_", nm), "S0 season effect (shared)",
         ifelse(grepl("^delta_", nm), "season deviation (shared)",
         ifelse(grepl("^log2_sigma", nm), "elderly susceptibility (global)",
         ifelse(grepl(":logit_S0", nm), "S0 (country)",
@@ -359,8 +367,8 @@ jm_recovery_summary = function(rec, d){
               coverage = if ("covered" %in% names(cmp)) mean(covered, na.rm = TRUE) else NA_real_,
               .groups = "drop") %>% arrange(family)
   # rank recovery: within each replicate, does the ORDER of the shared season parameters come back?
-  rank_rec = cmp %>% filter(grepl("^log_R0|^delta_", parameter)) %>%
-    mutate(block = ifelse(grepl("^log_R0", parameter), "R0 by season", "season deviation")) %>%
+  rank_rec = cmp %>% filter(grepl("^x_|^delta_", parameter)) %>%
+    mutate(block = ifelse(grepl("^x_", parameter), "S0 season effect", "season deviation")) %>%
     group_by(rep, block) %>%
     summarise(spearman = suppressWarnings(cor(truth, estimate, method = "spearman")),
               pearson = cor(truth, estimate), .groups = "drop") %>%
@@ -407,13 +415,13 @@ jm_misspecification_check = function(d, theta_true, violations = c("r0_by_countr
     }
     out = data.frame(arm = v, absorbable = if (v == "none") NA
                        else !jm_violation_is_real(sim(theta_true, d, seed)),
-                     rank_R0 = rk("^log_R0"), rank_visibility = rk("^delta_"),
+                     rank_x = rk("^x_"), rank_visibility = rk("^delta_"),
                      rank_S0 = rk(":logit_S0"), rank_c = rk(":log_c"),
                      noise_excess = r$adequacy_excess, negll = r$negll,
                      seconds = as.numeric(difftime(Sys.time(), t0, units = "secs")),
                      row.names = NULL)
-    if (verbose) cat(sprintf("R0 %.2f  visibility %.2f  S0 %.2f  noise %.2fx  [%.0f s]\n",
-                             out$rank_R0, out$rank_visibility, out$rank_S0, out$noise_excess,
+    if (verbose) cat(sprintf("S0-season %.2f  visibility %.2f  S0-country %.2f  noise %.2fx  [%.0f s]\n",
+                             out$rank_x, out$rank_visibility, out$rank_S0, out$noise_excess,
                              out$seconds))
     out
   })
@@ -422,34 +430,35 @@ jm_misspecification_check = function(d, theta_true, violations = c("r0_by_countr
   # a violation is DETECTED if it degrades any reported ranking materially; the noise excess is
   # reported alongside so its blindness is on the record rather than assumed
   out$detected_by_ranking = out$arm != "none" &
-    (out$rank_R0 < ctl$rank_R0 - 0.15 | out$rank_visibility < ctl$rank_visibility - 0.15 |
+    (out$rank_x < ctl$rank_x - 0.15 | out$rank_visibility < ctl$rank_visibility - 0.15 |
      out$rank_S0 < ctl$rank_S0 - 0.15)
   out$detected_by_noise = out$arm != "none" & out$noise_excess > ctl$noise_excess * 1.25
   out
 }
 
 # ---- |-the learning-layer recovery: is a known driver effect recovered end to end? ----
-# For each replicate the truth had season parameters generated by the covariate x with slopes
-# beta_R0 and beta_delta. Here we run the SECOND step of the two-step procedure on the FITTED season
-# parameters and see whether those slopes come back.
+# For each replicate the truth had season parameters generated by the covariate z with slopes
+# beta_x and beta_delta. Here we run the SECOND step of the two-step procedure on the FITTED season
+# parameters and see whether those slopes come back. Both season-effect sets carry a constrained last
+# member (minus the sum of the free ones), which is reconstructed before regressing.
 jm_driver_recovery = function(rec, d){
   rows = lapply(rec$reps, function(r){
     dr = r$driver; if (is.null(dr)) return(NULL)
-    c1 = r$comparison %>% filter(grepl("^log_R0", parameter))
+    c1 = r$comparison %>% filter(grepl("^x_", parameter))
     c2 = r$comparison %>% filter(grepl("^delta_", parameter))
-    # the constrained season deviation: the last one is minus the sum of the others
-    dev_est = c(c2$est_theta, -sum(c2$est_theta)); dev_true = c(c2$truth_theta, -sum(c2$truth_theta))
-    b_R0 = coef(lm(c1$est_theta ~ dr$x))[2]
+    x_est = c(c1$est_theta, -sum(c1$est_theta))
+    dev_est = c(c2$est_theta, -sum(c2$est_theta))
+    b_x = coef(lm(x_est ~ dr$x))[2]
     b_dev = coef(lm(dev_est ~ dr$x))[2]
-    data.frame(beta_R0_true = dr$beta_R0, beta_R0_est = unname(b_R0),
+    data.frame(beta_x_true = dr$beta_x, beta_x_est = unname(b_x),
                beta_delta_true = dr$beta_delta, beta_delta_est = unname(b_dev))
   })
   out = do.call(rbind, Filter(Negate(is.null), rows))
   if (is.null(out)) return(NULL)
   list(per_rep = out, summary = data.frame(
-    quantity = c("beta_R0", "beta_delta"),
-    truth = c(out$beta_R0_true[1], out$beta_delta_true[1]),
-    mean_estimate = c(mean(out$beta_R0_est), mean(out$beta_delta_est)),
-    sd_estimate = c(sd(out$beta_R0_est), sd(out$beta_delta_est)),
+    quantity = c("beta_x", "beta_delta"),
+    truth = c(out$beta_x_true[1], out$beta_delta_true[1]),
+    mean_estimate = c(mean(out$beta_x_est), mean(out$beta_delta_est)),
+    sd_estimate = c(sd(out$beta_x_est), sd(out$beta_delta_est)),
     n_rep = nrow(out)))
 }

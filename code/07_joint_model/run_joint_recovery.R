@@ -77,11 +77,11 @@ if (n_driver > 0){
   # The point is not this particular x but whether a KNOWN effect of a covariate on the season
   # parameters survives the fit-then-regress procedure.
   x = c(1, 0, 1, 0, 0, 1, 0, 1)[seq_len(d$n_season)]
-  beta_R0 = 0.06; beta_delta = 0.35
-  cat(sprintf("truth: a one-sd move in the covariate shifts log R0 by %.2f (about %.0f%% on R0) and\n",
-              beta_R0, 100 * (exp(beta_R0) - 1)))
+  beta_x = 0.25; beta_delta = 0.35
+  cat(sprintf("truth: a one-sd move in the covariate shifts logit S0 by %.2f (about %+.0f%% on S0 at 0.8) and\n",
+              beta_x, 100 * (plogis(qlogis(0.8) + beta_x) / 0.8 - 1)))
   cat(sprintf("       log season visibility by %.2f (about %.0f%%)\n", beta_delta, 100 * (exp(beta_delta) - 1)))
-  rec3 = jm_recovery(d, truth_fn = function(i) jm_truth_with_driver(d, x, beta_R0, beta_delta, anchor = fit0$theta),
+  rec3 = jm_recovery(d, truth_fn = function(i) jm_truth_with_driver(d, x, beta_x, beta_delta, anchor = fit0$theta),
                      n_rep = n_driver, seed0 = 4000L,
                      fit_args = list(cores = cores))
   s3 = jm_recovery_summary(rec3, d)
@@ -89,7 +89,7 @@ if (n_driver > 0){
   cat("\n-- did the driver effect come back? --\n"); print(dr$summary, row.names = FALSE, digits = 3)
   cat("\n-- by parameter family --\n"); print(s3$by_family, row.names = FALSE, digits = 3)
   out$driver = list(rec = rec3, summary = s3, driver = dr, x = x,
-                    beta_R0 = beta_R0, beta_delta = beta_delta)
+                    beta_x = beta_x, beta_delta = beta_delta)
 }
 
 # ---- 4. can the recovery test FAIL? the misspecification arms ----
