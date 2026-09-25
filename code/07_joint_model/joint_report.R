@@ -298,6 +298,9 @@ plot_jm_mechanism = function(fit, ref = NULL){
              cbind(mu_of(th),    set = "as fitted",                     pair = "c x delta held constant"),
              cbind(mu_of(t_cdel), set = "c +50%, visibility /1.5",      pair = "c x delta held constant"))
   tr$set = factor(tr$set, levels = unique(tr$set))
+  # pin the facet order to what the caption says: facet_wrap would otherwise sort alphabetically
+  # and put "c x delta" on the LEFT, silently contradicting the text
+  tr$pair = factor(tr$pair, levels = c("same peak: susceptibility vs visibility", "c x delta held constant"))
   cols = c("grey30", .jm_blue, .jm_orange, "#C1541E"); names(cols) = levels(tr$set)
   ltys = c("solid", "solid", "solid", "22"); names(ltys) = levels(tr$set)
   ptr = ggplot(tr %>% filter(value > 0.5), aes(week, value, colour = set, linetype = set)) +
@@ -374,9 +377,9 @@ plot_jm_design = function(fit){
     labs(title = "What varies where: the whole model in one picture",
          subtitle = paste("Each row is a parameter; the three squares say whether it is allowed to differ between seasons,",
                           "between countries, or between age groups. The count on the right is how many numbers that row",
-                          "contributes. The design is the science: sharing transmissibility across countries is what makes",
-                          "susceptibility identifiable, and constraining season visibility to average one is what keeps it",
-                          "separable from each country's reporting level.", sep = "\n"),
+                          "contributes. The design is the science: FIXING transmissibility is what makes susceptibility",
+                          "identifiable from each wave's rise rate, and constraining each season effect to average zero is",
+                          "what separates it from the country level it is added to.", sep = "\n"),
          caption = sprintf("The counts add to %d fitted numbers, estimated from %d country-seasons of weekly age-specific data across %d countries and %d seasons.",
                            sum(spec$n), d$n_cs, d$n_country, d$n_season),
          x = NULL, y = NULL) +
