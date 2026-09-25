@@ -909,3 +909,28 @@ identified. The one question the design has to answer from shape alone is "a big
 susceptible or more visible?", and it can: a susceptibility effect makes the wave rise faster and peak
 earlier, a visibility effect scales it. The exact tie that remains is `c_c x delta_s`, broken by the
 average-one constraint, not by the data.
+
+**The data side, measured (same day).** Every family contracts by 0.69-0.95, `x_s` by 0.93. The
+posterior correlation between the two season effects in the same season is 0.27 (max 0.31), so
+"more susceptible or more visible" IS answered by the data, as the theory says it can be. Country
+level and reporting level correlate 0.26 in magnitude. Fitted `S0_{c,s}` tracks the observed early
+growth rate (Spearman 0.54 over 83 waves). The misspecification arms give the same picture as under
+the previous model -- a true 10% between-country R0 spread takes the country ranking from 0.93 to
+0.01, the season effects survive, the noise budget is blind -- now as the design's stated caveat.
+
+**The model comparison, reported against the decision.** On the same 85-cell design and likelihood,
+the previous model (`R0_s` fitted per season, `S0_c` per country; 182 parameters) has log-likelihood
+-50786.68 and this one (R0 fixed, `S0_c + x_s`; 181) has -50798.59: **11.9 nats in favour of the
+fitted-R0 model, AIC +21.8 against this one.** Not nested, so a likelihood comparison, not a test.
+What it says: the data prefer season-to-season variation that changes how *fast* a wave rises without
+changing how *many* are left to infect. A season effect on `S0` changes both. That is a real piece of
+learning about where season variation lives, and it is what the learning layer should pick up: the
+two parameterisations are two hypotheses, and this is the first comparison between them. The
+fixed-R0 model stays the working model by decision -- its identifiability story is cleaner and its
+S0 is the project's sensor -- with this result recorded rather than buried.
+
+**Two things the reparameterisation did NOT change.** The country ranking (only BE/DK and NL/NO,
+each within 0.001, swapped places) and 2025/2026 as the outlying season (highest `x_s`, as it was
+highest `R0_s`). Every `S0_c` moved up -- HR from 0.93 to 0.97, EE from 0.75 to 0.80 -- because a
+fixed R0 of 1.5 is below the 1.51-1.71 the seasons had been fitting, and a lower R0 forces a higher
+S0 to match the same rise rate: the founding caveat, observed.

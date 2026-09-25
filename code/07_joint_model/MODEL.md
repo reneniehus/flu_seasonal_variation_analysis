@@ -74,14 +74,21 @@ pushed through a Gaussian that would place a sixth of its mass below zero. The i
 three vaccine effects and the vaccination timing are fixed from external estimates; no parameter is
 allowed to vary in more than one direction at a time.
 
-**What it delivers, and what it does not.** The fit converges in about 140 s, every parameter family
-contracts against its prior, and the publishable quantities recover from data simulated at a known
-truth. Two limits are measured rather than asserted: the deterministic mean needs about 2.6x more
-observation noise than the data's own week-to-week scatter can explain, so some of what the model calls
-measurement error is really misfit; and the country susceptibility **ranking is conditional on
-transmissibility genuinely being shared** — on simulated data where countries' true R0 differed by 10%
-that ranking fell from 0.97 to 0.09. Season-level conclusions survive that test; the country ranking
-does not.
+**What it delivers, and what it does not.** The fit converges in about 95 s; every parameter family
+contracts against its prior by 0.69-0.95, and the season effect on susceptibility by 0.93, so nothing
+reported is a restated assumption. The question the design must answer from shape alone -- *a bigger
+season: more susceptible, or more visible?* -- it does answer: the posterior correlation between the
+two season effects is only 0.27 (max 0.31 over seasons). Two limits are measured rather than asserted:
+the deterministic mean needs about 2.6x more observation noise than the data's own week-to-week
+scatter can explain, so some of what the model calls measurement error is really misfit; and the
+country susceptibility **ranking is conditional on transmissibility genuinely being equal across
+countries** -- on simulated data where countries' true R0 differed by 10% that ranking fell from 0.93
+to 0.01, because with R0 pinned a real transmissibility difference has nowhere to go but `S0_c`.
+Season-level conclusions survive that test; the country ranking does not. And a **model comparison**
+says where the season variation prefers to live: the previous model, with a *fitted* per-season R0
+and a country-only S0, fits 11.9 nats better at one more parameter (AIC +21.8 against this model).
+The data lean towards seasons differing in how *fast* a wave rises rather than in how *many* are left
+to infect -- a finding to carry into the learning layer, not a reason to undo the decision.
 
 ## What was cut relative to the compartmental pilot, and why
 
@@ -213,6 +220,50 @@ exclusion, is in the box at the top of this file and in
   inclusion rule, Iceland (7 age-complete seasons), Malta (6) and Austria (5) would also qualify and
   were never offered to the model. Since sharing `R0_s` across the countries in the design is what
   identifies `S0_c`, which countries are in it is a substantive choice.
+
+## Identifiability: the theory, then what the data say (fixed-R0 model, 2026-09-25)
+
+**Theory.** With `R0` pinned, each wave's early growth rate `gamma (R0 S0 - 1)` identifies its
+`S0_{c,s}` outright -- nothing trades against it in the rise. Its final size then follows from
+`S0_{c,s}` (the SIR final-size relation), so the peak height identifies `c_{c,s}` given the shape; the
+seed identifies timing. The two-way decompositions `S0_c + x_s` and `c_c + delta_s` are ordinary
+additive designs on 85 cells with 12 + 7 free effects each -- 66 residual degrees of freedom -- and
+the average-zero constraints fix the level. The one question the design has to answer from shape
+alone is whether a bigger season is more susceptible (`x_s` up: faster rise, earlier peak, bigger
+final size) or more visible (`delta_s` up: the same curve scaled). Figure 03 shows the two at equal
+peak height; they differ by about five weeks in peak timing. The one exact tie that remains is
+`c_c x delta_s`, broken by the constraint, not by the data.
+
+**What the data say** (`output/joint_model/joint_fit.rds`, penalised Hessian):
+
+| claim | the number |
+|---|---|
+| the data decide, not the priors | contraction 0.95 (`S0_c`), 0.93 (`x_s`), 0.94 (`c_c`), 0.90 (`delta_s`); minimum over all families 0.69 (`sigma_eld`) |
+| susceptible-vs-visible is separable within a season | posterior corr(`x_s`, `delta_s`), same season: median 0.27, max 0.31 |
+| country level vs reporting level is separable | posterior corr(`logit S0_c`, `log c_c`): median magnitude 0.26 |
+| `S0` is read off the rise rate | Spearman(observed early growth rate, fitted `S0_{c,s}`) = 0.54 over 83 waves; the empirical rate is a crude 6-week slope, so this confirms the direction rather than the precision |
+| no direction the data cannot see | 0 near-flat eigenvalues of the likelihood-only Hessian; penalised Hessian positive definite |
+
+**Where it can fail** (misspecification arms, one replicate each):
+
+| simulated world | `x_s` rank | visibility rank | **`S0_c` rank** | noise |
+|---|---|---|---|---|
+| control, truth representable | 0.82 | 1.00 | **0.93** | 1.27x |
+| each country's true R0 differs (sd log 0.10) | 0.75 | 1.00 | **0.01** | 1.18x |
+| a second wave the SIR cannot make | 0.93 | 0.96 | **0.97** | 1.27x |
+
+The country ranking collapses when transmissibility genuinely differs between countries, exactly as
+the composite reading predicts; the season effects survive both violations; and the noise budget sees
+neither. Same picture as under the previous model, now as the design's stated caveat rather than a
+hidden one.
+
+**The learned season pattern.** `x_s` spans -0.33 (2015/2016) to +0.55 (2025/2026) on the logit scale
+-- a typical country's `S0` from 0.82 to 0.92 -- with sd 0.25 against sd 0.43 for the visibility
+effect. The two are **negatively** related across seasons (correlation of the point estimates -0.57):
+the seasons that spread most easily are the ones in which the smallest share of infections became a
+positive consultation. Since the same-season posterior correlation is only 0.27, this is a pattern in
+the estimates and not a degeneracy -- but 2025/2026, which carries the largest `x_s`, rests on 7 of 12
+countries on truncated grids, so read that endpoint with its sample size.
 
 ## Fixed, not fitted
 
