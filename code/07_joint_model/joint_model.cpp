@@ -230,6 +230,18 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   }
   for (int a = 0; a < A; ++a) for (int j = 0; j < A; ++j) Cs[a][j] /= rho;
 
+  // THE PHI HOLE. lgamma(y + phi) - lgamma(phi) is a difference of two numbers of size phi*log(phi):
+  // past phi ~ 1e8 it loses digits, and past ~1e15 it is pure cancellation noise that can come out
+  // hugely POSITIVE -- a log-likelihood of count data that cannot exist. An optimiser that wanders
+  // there sees an astonishingly good fit and stays (found by a model-comparison fit: Spain's log phi
+  // went to 44.7 and the "log-likelihood" to +3e6). The base-R mirror shares the formula and the
+  // garbage, so the identity test could not see it. Beyond 1e8 the negative binomial is Poisson to
+  // eight digits and no legitimate fit lives there (the fitted range is phi 0.15-1.8, the prior centre
+  // 4), so it is rejected outright and the optimiser turns back.
+  if (!(phi <= 1e8)){
+    if (want_fit) *fit_out = List::create(_["mu"] = List(0), _["attack"] = NumericMatrix(0, A));
+    return R_NegInf;
+  }
   const double lg_phi = std::lgamma(phi), log_phi = std::log(phi);
   double lp = 0.0;
   std::vector<double> inc;
@@ -402,7 +414,11 @@ List jm_fitted_cpp(NumericVector theta, List d){
   List mu_all(n_cs); NumericMatrix attack_all(n_cs, A);
   for (int ic = 0; ic < C; ++ic){
     List fit;
-    country_lp(th, d, ic, sh, true, &fit);
+    const double v = country_lp(th, d, ic, sh, true, &fit);
+    // a rejected country leaves an EMPTY result; indexing it below would be undefined behaviour
+    if (!R_finite(v))
+      stop("cannot compute fitted values: country %d is rejected by the likelihood (its dispersion "
+           "phi exceeds 1e8, or its contact matrix has no positive spectral radius)", ic + 1);
     const List mu = fit["mu"]; const NumericMatrix at = fit["attack"];
     const IntegerVector mine = cs_of_country[ic];
     for (int m = 0; m < mine.size(); ++m){

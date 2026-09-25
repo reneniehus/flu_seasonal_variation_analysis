@@ -817,3 +817,38 @@ test_that("the sensing switch gives four models with one layout, each matching i
   fr <- jm_fit(dd, max_sweeps = 1L, cores = 1, verbose = FALSE)
   expect_error(save_jm_report(fr, dir = withr::local_tempdir()), "season_on = R0")
 })
+
+# ---- the phi hole: a defect the C++ and its mirror SHARED, so the identity test could not see it ----
+test_that("the likelihood agrees with R's own dnbinom, and rejects the phi region where it cannot", {
+  # lgamma(y + phi) - lgamma(phi) is a difference of two numbers of size phi*log(phi). Past phi ~ 1e8
+  # it loses digits; past ~1e15 it is cancellation noise and can come out hugely POSITIVE. A
+  # model-comparison fit found it: one country's log phi ran to 44.7 and the "log-likelihood" to +3e6.
+  # Both implementations agreed, because both use that formula -- which is why this test compares
+  # against a THIRD, independent implementation: R's dnbinom, which is numerically robust.
+  source(here::here("code/07_joint_model/joint_recovery.R"))
+  dnb_loglik <- function(theta, dd){
+    p <- jm_unpack(theta, dd); f <- jm_fitted_cpp(theta, dd)
+    sum(vapply(seq_len(dd$n_cs), function(i){
+      ic <- dd$cs_country[i] + 1L; y <- dd$y[[i]]; mu <- f$mu[[i]]; ok <- is.finite(y)
+      sum(dnbinom(y[ok], size = p$country[[ic]]$phi, mu = pmax(mu[ok], 1e-10), log = TRUE))
+    }, numeric(1)))
+  }
+  j <- grep("DK:log_phi", jm_par_names(d))
+  # across the whole legitimate range and up to the cap: the formula must match dnbinom
+  for (v in c(-3, 0, 2, 5, 10, 15, 18)){
+    t2 <- th; t2[j] <- v
+    expect_equal(jm_loglik_cpp(t2, d), dnb_loglik(t2, d), tolerance = 1e-6,
+                 info = sprintf("log phi = %g", v))
+  }
+  # beyond the cap: rejected by EVERY entry point, never scored
+  for (v in c(19, 25, 40, 100)){
+    t2 <- th; t2[j] <- v
+    expect_gte(jm_negll_cpp(t2, d), 1e10, label = sprintf("negll at log phi = %g", v))
+    expect_gte(jm_negll_R(t2, d), 1e10, label = sprintf("negll_R at log phi = %g", v))
+    expect_false(is.finite(jm_loglik_cpp(t2, d)), label = sprintf("loglik at log phi = %g", v))
+    expect_gte(jm_country_negll_cpp(t2, d, 0L), 1e10, label = sprintf("country negll at log phi = %g", v))
+    expect_error(jm_fitted_cpp(t2, d), "rejected")
+  }
+  # and the cap is far above anything a real fit produces: the prior centre is log 4, sd 1
+  expect_gt(log(1e8), d$pr_phi_mean + 10 * d$pr_phi_sd)
+})

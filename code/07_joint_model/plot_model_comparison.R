@@ -43,11 +43,11 @@ plot_model_comparison = function(cmp, fits, inf = NULL, out = NULL){
     geom_text(aes(label = sprintf("%+.1f", dll)), size = 2.6, colour = "grey15") +
     scale_fill_gradient2(low = blue, mid = "grey95", high = orange, midpoint = 0, limits = c(-lim, lim),
                          name = "log-likelihood,\nR0 minus S0") +
-    labs(title = sprintf("(b) Wave by wave: does the SEASON effect prefer R0 or S0?  total %+.1f nats, %d of %d waves favour R0",
-                         sum(cc$dll), sum(cc$dll > 0), nrow(cc)),
-         subtitle = paste("The same fit with the season effect moved from S0 to R0 (country effect on S0 in both). Orange: the wave is",
-                          "better explained by a faster rise WITHOUT a bigger pool; blue: by a bigger pool as well. Countries",
-                          "ordered by their total.", sep = "\n"),
+    labs(title = "(b) Wave by wave: does the SEASON effect prefer R0 or S0?",
+         subtitle = sprintf(paste("Total %+.1f nats; %d of %d waves favour R0. The same fit with the season effect moved from S0",
+                                  "to R0 (country effect on S0 in both). Orange: the wave is better explained by a faster rise",
+                                  "WITHOUT a bigger pool; blue: by a bigger pool as well. Countries ordered by their total.", sep = "\n"),
+                            sum(cc$dll), sum(cc$dll > 0), nrow(cc)),
          x = NULL, y = NULL) +
     theme_minimal(10) + theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 30, hjust = 1),
                               plot.title = element_text(face = "bold"))
@@ -72,10 +72,10 @@ plot_model_comparison = function(cmp, fits, inf = NULL, out = NULL){
     geom_line(data = curves, aes(week, value, colour = model), linewidth = 1) +
     scale_colour_manual(values = c("S0/S0" = blue, "R0/S0" = orange),
                         labels = c("S0/S0" = "season effect on S0 (working model)", "R0/S0" = "season effect on R0"), name = NULL) +
-    labs(title = sprintf("(c) The wave that discriminates most: %s %s (%+.1f nats for R0)", ic_name, s_name, cc$dll[k]),
-         subtitle = paste("Points are the observed ILI+ per 100 000, lines the two fitted means. The two mechanisms reach the peak",
-                          "with a different rise-to-decay shape: an S0 effect that makes the rise faster also deepens the pool,",
-                          "so the decay differs. This is the shape the likelihood is scoring across all 85 waves.", sep = "\n"),
+    labs(title = sprintf("(c) Most discriminating wave: %s %s (%+.1f nats for R0)", ic_name, s_name, cc$dll[k]),
+         subtitle = paste("Points: observed ILI+ per 100 000; lines: the two fitted means. The two mechanisms reach",
+                          "the peak with a different rise-to-decay shape: an S0 effect that makes the rise faster",
+                          "also deepens the pool, so the decay differs. This is the shape scored across all 85 waves.", sep = "\n"),
          x = "week of the season (from 1 August)", y = "ILI+ per 100 000") +
     theme_minimal(10) + theme(legend.position = "top", plot.title = element_text(face = "bold"))
 
@@ -91,17 +91,27 @@ plot_model_comparison = function(cmp, fits, inf = NULL, out = NULL){
                   k1$favour_B, k1$n_waves, k1$sign_p, k1$wilcoxon_p, k1$total,
                   k1$ci_wave_lo, k1$ci_wave_hi, k1$ci_country_lo, k1$ci_country_hi,
                   k1$ci_season_lo, k1$ci_season_hi, inf$rho, k1$total_deflated)
+    # the ceiling: if the S0 model was re-fitted with a higher pinned R0, say how much of the gap that alone recovers
+    r17 = cmp$table[cmp$table$model == "S0/S0 R0=1.7", ]
+    if (nrow(r17) == 1){
+      p0 = jm_unpack(fits[["S0/S0"]]$theta, fits[["S0/S0"]]$d)
+      n_ceiling = sum(unlist(lapply(p0$country, `[[`, "S0_season")) > 0.95)
+      txt = paste(txt, sprintf(paste("the gap is a ceiling effect: %d of %d fitted S0 exceed 0.95 at R0 = 1.5, and",
+                                     "re-pinning R0 = 1.7 in the S0 model alone recovers %+.1f of the %+.1f", sep = "\n"),
+                               n_ceiling, k1$n_waves, r17$loglik - cmp$table$loglik[cmp$table$model == "S0/S0"], k1$total),
+                  sep = "\n")
+    }
     pd = ggplot(o, aes(rank, dll, colour = favour)) +
       geom_hline(yintercept = 0, colour = "grey60") +
       geom_segment(aes(xend = rank, yend = 0), linewidth = 0.6) +
       geom_point(size = 1.6) +
       annotate("label", x = 1, y = max(o$dll), label = txt, hjust = 0, vjust = 1, size = 2.9,
-               lineheight = 1.05, colour = "grey15", fill = "white", label.size = 0) +
+               lineheight = 1.05, colour = "grey15", fill = "white") +
       scale_colour_manual(values = c(R0 = orange, S0 = blue), name = "wave favours") +
       labs(title = "(d) The evidence with the WAVE as the unit, not the week",
-           subtitle = paste("Each lollipop is one country-season's log-likelihood difference (season effect on R0 minus on S0). Weeks",
-                            "inside a wave are autocorrelated, so the total in nats overstates the evidence; the sign test, Wilcoxon",
-                            "and cluster bootstrap use only between-wave independence.", sep = "\n"),
+           subtitle = paste("One lollipop per country-season: its log-likelihood difference, season effect on R0",
+                            "minus on S0. Weeks inside a wave are autocorrelated, so the total in nats overstates the",
+                            "evidence; the sign test, Wilcoxon and cluster bootstrap use only between-wave independence.", sep = "\n"),
            x = "waves, sorted", y = "log-likelihood difference") +
       theme_minimal(10) + theme(legend.position = "top", plot.title = element_text(face = "bold"))
   }

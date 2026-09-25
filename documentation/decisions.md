@@ -934,3 +934,38 @@ each within 0.001, swapped places) and 2025/2026 as the outlying season (highest
 highest `R0_s`). Every `S0_c` moved up -- HR from 0.93 to 0.97, EE from 0.75 to 0.80 -- because a
 fixed R0 of 1.5 is below the 1.51-1.71 the seasons had been fitting, and a lower R0 forces a higher
 S0 to match the same rise rate: the founding caveat, observed.
+
+### 2026-09-25 (later the same day) -- `S0` or `R0`: the proper comparison, and what it actually found
+
+**Owner request.** A proper model comparison between sensing season and country effects with `S0`
+and sensing them with `R0`, using only methods suitable for time series whose weekly observations are
+not independent. Full numbers and tables in MODEL.md ("Where does the variation live"); figure 17.
+
+**How.** One layout, a switch per effect (`season_on`, `country_on` in {`S0`, `R0`}), four models of
+181 parameters on the same 85 cells and likelihood. The unit of inference is the wave: per-wave
+paired log-likelihood differences, sign test, Wilcoxon, cluster bootstrap by wave / country /
+season. Raw nats and AIC are reported but flagged: residual lag-1 autocorrelation inside waves is
+0.21, so they overstate by about a third.
+
+**Result.** Raw likelihood favours either `R0` lever by 10-12 nats (both together: no more). With the
+wave as the unit there is no preference: 37-39 of 85 waves favour `R0` (sign test p 0.28-0.52,
+Wilcoxon 0.61-0.67), every bootstrap interval on the total spans zero widely, and the typical wave
+prefers `S0`. The raw gap sits in Croatia and 2025/2026 alone -- exactly the cells where the working
+model's `S0` presses its ceiling of 1 at `R0 = 1.5` (8 of 85 cells above 0.95). Re-pinning `R0 = 1.7`
+inside the working model recovers 95% of the gap with the country ranking preserved (Spearman 0.99).
+
+**Decision.** The working model stays `S0/S0`: the data do not distinguish the mechanisms, and the
+`S0` reading is the project's sensor. The abstract's earlier sentence that the fitted-R0 model "fits
+11.9 nats better, AIC +21.8" is withdrawn as a claim about evidence -- it was the raw number, and the
+wave-level analysis shows it is not evidence of a mechanism but of a ceiling. **Open for the owner:**
+whether to raise the pin to 1.7 (no cell then above 0.90; every `S0_c` moves down, Croatia 0.97 to
+0.86; ranking unchanged). Until decided, `R0 = 1.5` stands and the 8 ceiling cells are a stated caveat.
+
+**A hole this comparison exposed, closed.** The first `R0 = 1.6` refit returned a log-likelihood of
++3e6: one country's `log phi` ran to 44.7, where `lgamma(y + phi) - lgamma(phi)` is catastrophic
+cancellation. The C++ and its base-R mirror share the formula, so the identity test that guards the
+likelihood could not see it. Now `phi > 1e8` is rejected in both (a sentinel, never scored), and a
+new test compares the likelihood against R's `dnbinom` -- an independent third implementation --
+across the legitimate range and checks the rejection at every entry point. `jm_fitted_cpp` also now
+stops on a rejected country instead of indexing an empty result. No earlier fit was in that region
+(fitted `phi` 0.15-1.8, prior centre 4), so no reported number changes.

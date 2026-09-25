@@ -85,10 +85,15 @@ country susceptibility **ranking is conditional on transmissibility genuinely be
 countries** -- on simulated data where countries' true R0 differed by 10% that ranking fell from 0.93
 to 0.01, because with R0 pinned a real transmissibility difference has nowhere to go but `S0_c`.
 Season-level conclusions survive that test; the country ranking does not. And a **model comparison**
-says where the season variation prefers to live: the previous model, with a *fitted* per-season R0
-and a country-only S0, fits 11.9 nats better at one more parameter (AIC +21.8 against this model).
-The data lean towards seasons differing in how *fast* a wave rises rather than in how *many* are left
-to infect -- a finding to carry into the learning layer, not a reason to undo the decision.
+asks where the variation prefers to live -- in the susceptible pool or in transmissibility -- by
+moving the season effect, the country effect, or both from `S0` onto `R0` in the same 181-parameter
+layout. The raw log-likelihood favours `R0` by 10-12 nats, but that number counts autocorrelated
+weeks as if independent. With the **wave as the unit**, the preference is not there: 37 of 85 waves
+favour `R0` (sign test p = 0.28), every cluster-bootstrap interval on the total spans zero, and the
+raw gap is carried by Croatia and 2025/2026 alone -- the cells where this model's `S0` presses its
+ceiling of 1 at `R0 = 1.5`. Pinning `R0 = 1.7` inside this model recovers 95% of that gap with the
+country ranking preserved (rank correlation 0.99). **The data do not distinguish the two mechanisms**; the `S0` model stays
+by decision, and what the comparison actually found is that 1.5 is a ceiling, not a constant.
 
 ## What was cut relative to the compartmental pilot, and why
 
@@ -265,9 +270,83 @@ positive consultation. Since the same-season posterior correlation is only 0.27,
 the estimates and not a degeneracy -- but 2025/2026, which carries the largest `x_s`, rests on 7 of 12
 countries on truncated grids, so read that endpoint with its sample size.
 
+## Where does the variation live: in `S0` or in `R0`? (model comparison, 2026-09-25)
+
+**The question.** The working model senses season and country with the susceptible pool:
+`logit S0_{c,s} = S0_c + x_s`, `R0 = 1.5`. The alternative senses them with transmissibility:
+`log R0_{c,s} = R0_c + r_s`, `S0 = 0.75`. The two are the same layout with one anchor and one fitted
+family swapped -- 181 parameters either way -- so each effect can be placed on either quantity
+independently, giving four models: `S0/S0` (working), `R0/S0`, `S0/R0`, `R0/R0` (season / country).
+Same data, same likelihood, not nested: a likelihood comparison, not a test. What the likelihood
+scores is shape: an effect on `S0` changes how fast a wave rises *and* how many are left to infect
+(a deeper pool decays differently); an effect on `R0` changes the speed only. Figure 17
+(`output/joint_model/17_model_comparison.png`); scripts `run_model_comparison.R`,
+`compare_inference.R`, `plot_model_comparison.R`.
+
+**The raw numbers, and why they overstate.**
+
+| model | season on | country on | log-likelihood | vs working | AIC vs working |
+|---|---|---|---|---|---|
+| `S0/S0` | S0 | S0 | -50798.59 | 0 | 0 |
+| `R0/S0` | R0 | S0 | -50788.43 | +10.16 | -20.3 |
+| `S0/R0` | S0 | R0 | -50786.95 | +11.64 | -23.3 |
+| `R0/R0` | R0 | R0 | -50786.92 | +11.67 | -23.3 |
+
+Either lever on `R0` gains 10-12 nats; both together gain nothing more (interaction -10.1 nats), so
+this is one signal, not two. But nats and AIC count each week as an independent observation, and the
+weeks inside a wave are not: the residual lag-1 autocorrelation within waves has median 0.21
+(quartiles -0.01 and 0.42), an AR(1) effective-sample-size factor of 0.65, so the honest size of the
+gap is nearer 7 nats -- and the unit of inference has to be the wave.
+
+**With the wave as the unit** (85 country-seasons; per-wave paired log-likelihood differences; sign
+test, Wilcoxon signed-rank, and a cluster bootstrap of the total resampling waves, countries or seasons):
+
+| contrast (`R0` variant minus working) | waves favouring `R0` | sign test | Wilcoxon | total | 95% CI, waves | countries | seasons |
+|---|---|---|---|---|---|---|---|
+| season effect on `R0` (`R0/S0`) | 37 of 85 | p = 0.28 | p = 0.61 | +10.2 | [-17.8, +44.5] | [-26.4, +59.6] | [-17.9, +41.9] |
+| country effect on `R0` (`S0/R0`) | 39 of 85 | p = 0.52 | p = 0.67 | +11.6 | [-16.6, +46.3] | [-26.5, +64.4] | [-16.8, +42.9] |
+| both on `R0` (`R0/R0`) | 38 of 85 | p = 0.39 | p = 0.65 | +11.7 | [-16.6, +46.4] | [-26.7, +64.5] | [-16.8, +43.0] |
+
+The *typical* wave prefers `S0` (median per-wave difference -0.04 to -0.06 nats); the total is
+positive because a few waves prefer `R0` by a lot. Croatia carries +18.9 of the +10.2 and 2025/2026
++12.4 (Croatia 2025/2026 alone +12.0); every other cell together nets -9.1, against `R0`.
+
+**Why those cells: the ceiling.** With `R0 = 1.5`, the fastest rise the working model can produce is
+`gamma (1.5 - 1)` -- at `S0 = 1`. It presses that ceiling: 8 of 85 fitted `S0_{c,s}` exceed 0.95
+(maximum 0.985; Croatia's country level 0.974). The `R0` variants have no ceiling. Refitting the
+working model with a higher pin and nothing else changed:
+
+| pinned `R0` | vs `R0 = 1.5` | max `S0_{c,s}` | cells above 0.95 | Croatia level | gain in Croatia | in 2025/2026 | all other cells |
+|---|---|---|---|---|---|---|---|
+| 1.5 | 0 | 0.985 | 8 | 0.974 | | | |
+| 1.6 | +7.00 | 0.944 | 0 | 0.917 | +8.4 | +6.4 | -2.1 |
+| 1.7 | +9.64 | 0.900 | 0 | 0.864 | +12.3 | +9.1 | -3.6 |
+
+`R0 = 1.7` recovers 95% of what the season-on-`R0` model gains, in the same cells, with no effect
+on `R0` at all, and the country ranking of `S0_c` is preserved (Spearman 0.993 between the 1.5 and
+1.7 fits). What the `R0` variants "know" is only that Croatia and 2025/2026 rose faster than a pool
+of at most 100% susceptibles can at `R0 = 1.5`.
+
+**Verdict.** The data do not distinguish sensing with `S0` from sensing with `R0`: a rise-rate
+difference can be booked to either, and the shape signal that separates them is worth a few nats
+spread over 85 waves, pointing slightly to `S0` in the typical wave and strongly to `R0` only where
+`S0` has run out of room. The working model stays `S0/S0` by decision. What the comparison did
+establish is that **1.5 is a ceiling, not a constant**: it binds in 8 of 85 cells, and a pin of 1.7
+frees every cell (no `S0_{c,s}` above 0.90) at the cost of every `S0_c` moving down (Croatia 0.97 to
+0.86). Whether to raise it is the owner's call; the composite reading of `S0` (section on R0 in a
+country) is the same at either value.
+
+**What the comparison also found.** The first `R0 = 1.6` refit reported a log-likelihood of +3 000 000:
+Spain's dispersion had run to `log phi = 44.7`, where `lgamma(y + phi) - lgamma(phi)` is catastrophic
+cancellation and comes out hugely positive. Both the C++ and its base-R mirror use that formula, so
+the identity test was blind to it. Closed by rejecting `phi > 1e8` in both (the negative binomial is
+Poisson to eight digits there, and every real fit has `phi` between 0.15 and 1.8), with a test
+against R's own `dnbinom` as an independent third implementation. No previous result was in that
+region; the refit above is the valid one.
+
 ## Fixed, not fitted
 
-`R0 = 1.5` everywhere (see the section above); `gamma = 1/3.6` per day; `ve_inf = 0.25`, `ve_ili_cond_inf = 0.20`, `ve_spread = 0.20`; vaccination
+`R0 = 1.5` everywhere (see the two sections above); `gamma = 1/3.6` per day; `ve_inf = 0.25`, `ve_ili_cond_inf = 0.20`, `ve_spread = 0.20`; vaccination
 pulse on season day 62 into 65+ only, at the reported national coverage; the contact matrix, rescaled
 to spectral radius one, and re-rescaled after the elderly susceptibility re-weights it, so `R0_s` is
 independent of `sigma_eld` (verified); no waning, no ageing, no importation

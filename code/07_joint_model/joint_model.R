@@ -705,6 +705,7 @@ jm_negll_R = function(th, d){
     log_R0_c   = if (cty_S0) log(d$R0_fixed) else slot0
     c_age = cc * 2^c(th[base + 3], 0, th[base + 4])
     phi = exp(th[base + 5])
+    if (!(phi <= 1e8)) return(1e10)          # the phi hole: rejected, exactly as the .cpp does
     b = exp(th[base + 5 + seq_len(nsrc)])
     I0v = exp(th[base + 5 + nsrc + seq_len(d$n_cs_of_country[ic])])
     Cs = sweep(d$Cn[[ic]], 1, sigma, "*")
