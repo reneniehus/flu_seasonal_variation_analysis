@@ -694,6 +694,12 @@ plot_jm_recovery = function(rec, d, summ = NULL){
 
 # ================= write the default set =================
 save_jm_report = function(fit, id = NULL, iv = NULL, rec = NULL, dir = "output/joint_model"){
+  # The figure set reads the working model's parameterisation (season and country effects on S0).
+  # The comparison variants are fitted for their likelihood, not for this set; refuse rather than
+  # draw figures whose subtitles would describe the wrong quantity.
+  if (!identical(fit$d$season_on, "S0") || !identical(fit$d$country_on, "S0"))
+    stop("save_jm_report() draws the S0/S0 working model; this fit has season_on = ", fit$d$season_on,
+         ", country_on = ", fit$d$country_on, ". Use the comparison script's own figure for it.")
   dir.create(dir, showWarnings = FALSE, recursive = TRUE)
   # Omitting `iv` is legitimate -- a quick look without waiting minutes for the Hessian -- but it must
   # be announced, because figures 09-13 then carry NO uncertainty and look no different for it. The

@@ -26,12 +26,19 @@
 //   +1                 log c_c      the country's reporting level at the average season;
 //                                   log c_{c,s} = log c_c + delta_s
 //
-// R0 IS FIXED (d["R0_fixed"], 1.5), not fitted. Transmissibility and susceptibility enter the rise
-// rate as a product and are indistinguishable from one wave, so one of them has to be pinned; with
-// R0 pinned from the literature, S0 becomes the single "how easily did this season spread here"
-// sensor, and its two-way decomposition into a country level and a season effect is what the joint
-// fit identifies (MODEL.md). Any genuine season-to-season variation in transmissibility is
-// therefore absorbed into x_s -- a composite index, by design.
+// WHICH QUANTITY SENSES WHAT is a switch, read from d["season_on"] and d["country_on"], each "S0" or
+// "R0". The parameter LAYOUT is identical in every setting -- the same slots, the same count -- only
+// the meaning of two slot sets changes:
+//   season slots [0..S-2]  x_s, a logit shift on S0   when season_on  == "S0"
+//                          r_s, a log   shift on R0   when season_on  == "R0"
+//   country slot  +0       logit S0_c                 when country_on == "S0"
+//                          log   R0_c                 when country_on == "R0"
+// Whatever carries no effect is FIXED: d["R0_fixed"] (1.5) and/or d["S0_fixed"] (0.75). So the four
+// combinations are four models with the same parameter count, comparable by likelihood:
+//   S0/S0 (the working model), R0/R0, and the two hybrids. Transmissibility and susceptibility enter
+// the rise rate as a product and are indistinguishable from one wave; they differ in whether the
+// POOL left to infect changes too (S0) or only the speed (R0). That difference is what the
+// comparison tests (MODEL.md).
 //   +2                 off_young                     log2 reporting offset vs adults
 //   +3                 off_eld
 //   +4                 log phi_c
@@ -173,7 +180,10 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   const double ve_spread= as<double>(d["ve_spread"]);
   const double rate_per = as<double>(d["rate_per"]);
   const int    vax_day  = as<int>(d["vax_day"]);
-  const double R0_fixed = as<double>(d["R0_fixed"]);   // the ONE transmissibility, not fitted
+  const double R0_fixed = as<double>(d["R0_fixed"]), S0_fixed = as<double>(d["S0_fixed"]);
+  const bool season_on_S0  = as<std::string>(d["season_on"])  == "S0";
+  const bool country_on_S0 = as<std::string>(d["country_on"]) == "S0";
+  const double logit_S0_fixed = std::log(S0_fixed / (1.0 - S0_fixed)), log_R0_fixed = std::log(R0_fixed);
   // the season horizon the dynamics run to, so the attack rate does not depend on where a country's
   // surveillance series happens to stop. Absent (an older cached d) falls back to 0 = the old
   // behaviour, which keeps a stale object readable rather than erroring on it.
@@ -191,9 +201,9 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   const IntegerVector mine = cs_of_country[ic];
   const int base = off_country[ic], nsrc = n_src[ic];
 
-  // local parameters. logit S0_c is the country's level at the AVERAGE season; the season effect
-  // x_s is added per country-season below, so S0 differs between this country's seasons.
-  const double logitS0_c = th[base + 0];
+  // local parameters. Slot 0 is the country's level of whichever quantity carries the country
+  // effect (logit S0_c or log R0_c); the season effect is added per country-season below.
+  const double slot0 = th[base + 0];
   const double c_c   = std::exp(th[base + 1]);
   const double oy    = th[base + 2], oe = th[base + 3];
   const double phi   = std::exp(th[base + 4]);
@@ -227,8 +237,11 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
     const NumericMatrix y = y_list[ics];
     const int nw = y.nrow();
     const int s  = cs_season[ics];
-    const double beta = R0_fixed * gamma;
-    const double S0 = 1.0 / (1.0 + std::exp(-(logitS0_c + sh.xs[s])));   // this country, this season
+    // this country, this season: each quantity is its fixed anchor unless it carries an effect
+    const double logitS0 = (country_on_S0 ? slot0 : logit_S0_fixed) + (season_on_S0 ? sh.xs[s] : 0.0);
+    const double logR0   = (country_on_S0 ? log_R0_fixed : slot0)   + (season_on_S0 ? 0.0 : sh.xs[s]);
+    const double beta = std::exp(logR0) * gamma;
+    const double S0 = 1.0 / (1.0 + std::exp(-logitS0));
     const double I0 = std::exp(logI0[cs_pos[ics]]);
     const double b  = std::exp(logb[cs_src[ics]]);
     const double dev = sh.dev[s];
@@ -266,7 +279,8 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   }
 
   // the country's own priors
-  lp += dnorm_log(th[base + 0], as<double>(d["pr_S0_mean"]), as<double>(d["pr_S0_sd"]));
+  if (country_on_S0) lp += dnorm_log(th[base + 0], as<double>(d["pr_S0_mean"]),  as<double>(d["pr_S0_sd"]));
+  else               lp += dnorm_log(th[base + 0], as<double>(d["pr_R0c_mean"]), as<double>(d["pr_R0c_sd"]));
   lp += dnorm_log(th[base + 1], as<double>(d["pr_c_mean"]),  as<double>(d["pr_c_sd"]));
   lp += dnorm_log(oy, 0.0, as<double>(d["pr_off_sd"]));
   lp += dnorm_log(oe, 0.0, as<double>(d["pr_off_sd"]));
@@ -282,7 +296,9 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
 // too, so all S values of each set sit under the same prior.
 static double shared_lp(const double* th, const List& d, int S){
   double lp = 0.0;
-  const double s_x = as<double>(d["pr_x_sd"]), s_dev = as<double>(d["pr_delta_sd"]);
+  // the season effect's prior sd depends on which scale it lives on
+  const double s_x = as<std::string>(d["season_on"]) == "S0" ? as<double>(d["pr_x_sd"]) : as<double>(d["pr_r_sd"]);
+  const double s_dev = as<double>(d["pr_delta_sd"]);
   double sum_x = 0.0, sum_d = 0.0;
   for (int s = 0; s < S - 1; ++s){ lp += dnorm_log(th[s], 0.0, s_x); sum_x += th[s]; }
   lp += dnorm_log(-sum_x, 0.0, s_x);
@@ -351,7 +367,9 @@ double jm_loglik_cpp(NumericVector theta, List d){
   for (int ic = 0; ic < C; ++ic){
     const int base = off_country[ic], nsrc = n_src[ic];
     const IntegerVector mine = cs_of_country[ic];
-    ll -= dnorm_log(th[base + 0], as<double>(d["pr_S0_mean"]), as<double>(d["pr_S0_sd"]));
+    if (as<std::string>(d["country_on"]) == "S0")
+         ll -= dnorm_log(th[base + 0], as<double>(d["pr_S0_mean"]),  as<double>(d["pr_S0_sd"]));
+    else ll -= dnorm_log(th[base + 0], as<double>(d["pr_R0c_mean"]), as<double>(d["pr_R0c_sd"]));
     ll -= dnorm_log(th[base + 1], as<double>(d["pr_c_mean"]),  as<double>(d["pr_c_sd"]));
     ll -= dnorm_log(th[base + 2], 0.0, as<double>(d["pr_off_sd"]));
     ll -= dnorm_log(th[base + 3], 0.0, as<double>(d["pr_off_sd"]));
