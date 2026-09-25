@@ -8,7 +8,7 @@
 #       difference the likelihood is scoring can be seen.
 suppressMessages({library(ggplot2); library(dplyr); library(patchwork)})
 
-plot_model_comparison = function(cmp, fits, out = NULL){
+plot_model_comparison = function(cmp, fits, inf = NULL, out = NULL){
   tab = cmp$table; cc = cmp$pairwise
   blue = "#2B5D8A"; orange = "#C1541E"
 
@@ -79,12 +79,40 @@ plot_model_comparison = function(cmp, fits, out = NULL){
          x = "week of the season (from 1 August)", y = "ILI+ per 100 000") +
     theme_minimal(10) + theme(legend.position = "top", plot.title = element_text(face = "bold"))
 
-  fig = (pa | pc) / pb + plot_layout(heights = c(1, 1.25)) +
+  # (d) the evidence with the WAVE as the unit: per-wave differences and the bootstrap on their total
+  pd = NULL
+  if (!is.null(inf)){
+    k1 = inf$contrasts[1, ]                          # season effect: R0 vs S0, country on S0
+    o = cc[order(cc$dll), ]; o$rank = seq_len(nrow(o)); o$favour = ifelse(o$dll > 0, "R0", "S0")
+    txt = sprintf(paste("%d of %d waves favour R0  (sign test p = %.2g, Wilcoxon p = %.2g)",
+                        "total %+.1f nats; 95%% bootstrap CI resampling waves [%+.1f, %+.1f],",
+                        "countries [%+.1f, %+.1f], seasons [%+.1f, %+.1f]",
+                        "residual lag-1 autocorrelation inside waves %.2f -> independent-equivalent ~%+.1f", sep = "\n"),
+                  k1$favour_B, k1$n_waves, k1$sign_p, k1$wilcoxon_p, k1$total,
+                  k1$ci_wave_lo, k1$ci_wave_hi, k1$ci_country_lo, k1$ci_country_hi,
+                  k1$ci_season_lo, k1$ci_season_hi, inf$rho, k1$total_deflated)
+    pd = ggplot(o, aes(rank, dll, colour = favour)) +
+      geom_hline(yintercept = 0, colour = "grey60") +
+      geom_segment(aes(xend = rank, yend = 0), linewidth = 0.6) +
+      geom_point(size = 1.6) +
+      annotate("label", x = 1, y = max(o$dll), label = txt, hjust = 0, vjust = 1, size = 2.9,
+               lineheight = 1.05, colour = "grey15", fill = "white", label.size = 0) +
+      scale_colour_manual(values = c(R0 = orange, S0 = blue), name = "wave favours") +
+      labs(title = "(d) The evidence with the WAVE as the unit, not the week",
+           subtitle = paste("Each lollipop is one country-season's log-likelihood difference (season effect on R0 minus on S0). Weeks",
+                            "inside a wave are autocorrelated, so the total in nats overstates the evidence; the sign test, Wilcoxon",
+                            "and cluster bootstrap use only between-wave independence.", sep = "\n"),
+           x = "waves, sorted", y = "log-likelihood difference") +
+      theme_minimal(10) + theme(legend.position = "top", plot.title = element_text(face = "bold"))
+  }
+  fig = if (is.null(pd)) (pa | pc) / pb + plot_layout(heights = c(1, 1.25)) else
+        (pa | pc) / (pb | pd) + plot_layout(heights = c(1, 1.25))
+  fig = fig +
     plot_annotation(
       title = "Where does the variation live: in the susceptible pool, or in transmissibility?",
       subtitle = "An effect on S0 changes how fast a wave rises AND how many are left to infect; an effect on R0 changes the speed only. The data can tell these apart.",
       theme = theme(plot.title = element_text(face = "bold", size = 15), plot.subtitle = element_text(size = 10, colour = "grey30")))
-  if (!is.null(out)) ggsave(out, fig, width = 15, height = 12.5, dpi = 115)
+  if (!is.null(out)) ggsave(out, fig, width = 17, height = 13, dpi = 115)
   fig
 }
 
@@ -98,6 +126,7 @@ if (sys.nframe() == 0){
   cmp = readRDS("output/joint_model/compare/comparison.rds")
   fits = list(`S0/S0` = readRDS("output/joint_model/compare/fit_S0_S0.rds"),
               `R0/S0` = readRDS("output/joint_model/compare/fit_R0_S0.rds"))
-  plot_model_comparison(cmp, fits, out = "output/joint_model/17_model_comparison.png")
+  inf = if (file.exists("output/joint_model/compare/inference.rds")) readRDS("output/joint_model/compare/inference.rds") else NULL
+  plot_model_comparison(cmp, fits, inf = inf, out = "output/joint_model/17_model_comparison.png")
   cat("wrote output/joint_model/17_model_comparison.png\n")
 }
