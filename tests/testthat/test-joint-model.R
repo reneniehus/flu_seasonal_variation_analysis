@@ -46,12 +46,14 @@ th <- jm_theta0(d)
 
 # The cached 12-country fit, or NULL when it predates the CURRENT parameter layout. Tests that read
 # it must skip on NULL rather than hand a stale theta to the C++, which indexes by the new layout and
-# either aborts or scores garbage. The layout changed on 2026-09-25 (R0 fixed; shared block 2S-1).
+# either aborts or scores garbage. The layout changed on 2026-09-25 (R0 fixed; shared block 2S-1) and
+# again on 2026-09-26 (the spatial spread tau: shared block 2S, or one slot per country).
 .jm_cached <- local({
   f <- here::here("output/joint_model/joint_fit.rds")
   if (!file.exists(f)) return(NULL)
   o <- readRDS(f)
-  ok <- !is.null(o$fit$d$R0_fixed) && length(o$fit$theta) == length(jm_par_names(o$fit$d))
+  ok <- !is.null(o$fit$d$R0_fixed) && !is.null(o$fit$d$tau_by_country) &&
+        length(o$fit$theta) == length(jm_par_names(o$fit$d))
   if (isTRUE(ok)) o else NULL
 })
 
@@ -77,6 +79,7 @@ test_that("every parameter slot is read back as its name says, and the deviation
   expect_equal(unname(p$delta[seq_len(S - 1)]), unname(probe[S - 1L + seq_len(S - 1)]))
   expect_equal(sum(p$delta), 0, tolerance = 1e-12)            # the constraint that removes the pilot's flat direction
   expect_equal(log2(p$sigma_eld), unname(probe[2L * S - 1L]))
+  expect_equal(log(p$tau), unname(probe[2L * S]))              # the shared spatial spread
   for (ic in seq_len(d$n_country)){
     b <- d$off_country[ic]; q <- p$country[[ic]]
     expect_equal(qlogis(q$S0), unname(probe[b + 1]))
@@ -86,6 +89,7 @@ test_that("every parameter slot is read back as its name says, and the deviation
     expect_equal(log(q$phi),   unname(probe[b + 5]))
     expect_equal(unname(log(q$b)),  unname(probe[b + 5 + seq_len(d$n_src[ic])]))
     expect_equal(unname(log(q$I0)), unname(probe[b + 5 + d$n_src[ic] + seq_len(d$n_cs_of_country[ic])]))
+    expect_equal(q$tau, p$tau)                                 # shared: every country reads the one tau
   }
 })
 
@@ -512,14 +516,14 @@ test_that("the default design is the documented one, and the attack rate is a se
   # TWO documented designs, and both are pinned. Without the positivity-encoding exclusion the
   # min_seasons = 5 decision gives 12 / 86 / 183; with it (the default since 2026-09-16, provisional
   # pending surveillance confirmation) CZ 2024/2025 is dropped and CZ loses the ERVISS baseline slot
-  # that had no off-season behind it, giving 12 / 85 / 181. (R0 fixed since 2026-09-25: the
-  # shared block is 2S-1, one slot shorter than when R0_s was fitted.)
+  # that had no off-season behind it, giving 12 / 85 / 182. (R0 fixed since 2026-09-25: the
+  # shared block lost the S slots of R0_s; the spatial spread tau added one on 2026-09-26.)
   full <- withr::with_dir(here::here(),
             jm_build_data(cand, models_in, demo, verbose = FALSE,
                           exclude_ambiguous_positivity = FALSE))
-  expect_equal(c(full$n_country, full$n_cs, full$n_par), c(12L, 86L, 183L))
+  expect_equal(c(full$n_country, full$n_cs, full$n_par), c(12L, 86L, 184L))
   dd <- withr::with_dir(here::here(), jm_build_data(cand, models_in, demo, verbose = FALSE))
-  expect_equal(c(dd$n_country, dd$n_cs, dd$n_par), c(12L, 85L, 181L))
+  expect_equal(c(dd$n_country, dd$n_cs, dd$n_par), c(12L, 85L, 182L))
   expect_true("ES" %in% dd$countries)            # the country the min_seasons decision was about
   expect_equal(dd$n_season, 8L)                  # no season is lost entirely by the exclusion
   # the dynamics horizon is a full season for every cell, and the observation windows are not
@@ -641,7 +645,8 @@ test_that("the ambiguous positivity encoding is detected and its seasons exclude
   expect_equal(length(jm_par_names(with_ex)), with_ex$n_par)
   bl <- jm_blocks(with_ex)
   expect_equal(sort(c(bl$shared, unlist(bl$local))), seq_len(with_ex$n_par))
-  expect_equal(with_ex$n_par, 2L * with_ex$n_season - 1L + sum(with_ex$n_local))
+  expect_equal(with_ex$n_par, with_ex$n_shared + sum(with_ex$n_local))
+  expect_equal(with_ex$n_shared, 2L * with_ex$n_season)       # x, delta, sigma and the shared tau
   expect_true(is.finite(jm_negll_cpp(jm_theta0(with_ex), with_ex)))
   for (ic in seq_len(with_ex$n_country))   # a source slot must never survive without data
     expect_equal(with_ex$n_src[ic],
@@ -680,7 +685,8 @@ test_that("the shared priors are counted once, not once per country", {
   x_free <- th[seq_len(S - 1)]; dev_free <- th[S - 1L + seq_len(S - 1)]
   expected <- -(sum(dn(c(x_free, -sum(x_free)), 0, d$pr_x_sd)) +
                 sum(dn(c(dev_free, -sum(dev_free)), 0, d$pr_delta_sd)) +
-                dn(th[2L * S - 1L], d$pr_sigma_mean, d$pr_sigma_sd))
+                dn(th[2L * S - 1L], d$pr_sigma_mean, d$pr_sigma_sd) +
+                dn(th[2L * S], d$pr_tau_mean, d$pr_tau_sd))
   expect_equal(unname(nl - parts), unname(expected), tolerance = 1e-8)
 })
 
@@ -708,6 +714,7 @@ test_that("no fitted slot is left without a prior", {
   # log-prior curvature is -2/sd^2: its own term plus the constrained term's dependence on it
   expect_equal(curv[1], -2 / d$pr_x_sd^2, tolerance = 1e-6)                 # x of season 1
   expect_equal(curv[d$n_season], -2 / d$pr_delta_sd^2, tolerance = 1e-6)    # delta of season 1
+  expect_equal(curv[2L * d$n_season], -1 / d$pr_tau_sd^2, tolerance = 1e-6)  # the shared spread
   # and the contraction denominator must be the sd the C++ actually applied, per family
   skip_if(is.null(.jm_cached), "no saved fit, or it predates this parameter layout")
   fam <- .jm_cached$id$family
@@ -715,7 +722,8 @@ test_that("no fitted slot is left without a prior", {
             "reporting c (country)" = d$pr_c_sd, "season deviation (shared)" = d$pr_delta_sd,
             "dispersion phi" = d$pr_phi_sd, "baseline b" = d$pr_b_sd,
             "age reporting offset" = d$pr_off_sd, "seed I0 (country-season)" = d$pr_I0_sd,
-            "elderly susceptibility (global)" = d$pr_sigma_sd)
+            "elderly susceptibility (global)" = d$pr_sigma_sd,
+            "spatial spread tau (shared)" = d$pr_tau_sd)
   for (k in names(want)) if (k %in% fam$family)
     expect_equal(fam$prior_sd[fam$family == k], unname(want[[k]]), tolerance = 1e-9, info = k)
 })
@@ -816,4 +824,101 @@ test_that("the likelihood agrees with R's own dnbinom, and rejects the phi regio
   }
   # and the cap is far above anything a real fit produces: the prior centre is log 4, sd 1
   expect_gt(log(1e8), d$pr_phi_mean + 10 * d$pr_phi_sd)
+})
+
+# ---- the spatial spread: a country's cities are hit at different times ----
+test_that("the spread kernel keeps the total and the rise rate and adds exactly its own width", {
+  # MODEL.md claims three exact properties of the spread. Each is checked on the kernel itself, the
+  # same C++ function the likelihood calls.
+  D <- 7L * 53L; t <- seq_len(D)
+  bump <- exp(-0.5 * ((t - 180) / 12)^2)
+  daily <- unname(cbind(bump, 2 * bump, 0.5 * bump))
+  plain <- unname(rowsum(daily, rep(seq_len(53), each = 7), reorder = FALSE))
+  for (tau in c(2, 7, 15)){
+    sp <- jm_spread_cpp(daily, tau, 53L)
+    # (1) the total: the kernel moves infections in time, never in number
+    expect_equal(colSums(sp), colSums(daily), tolerance = 1e-10, info = paste("tau", tau))
+    # (2) the mean timing: the kernel is symmetric
+    wk <- seq_len(53)
+    expect_equal(sum(wk * sp[, 1]) / sum(sp[, 1]), sum(wk * plain[, 1]) / sum(plain[, 1]), tolerance = 1e-9)
+    # (3) the width: variances add, exactly. The kernel's variance is tau^2 plus the day bin's 1/12,
+    # in weeks^2 (measured: equal to 5 digits, so the tolerance is tight)
+    v <- function(m) { p <- m / sum(m); sum(wk^2 * p) - sum(wk * p)^2 }
+    expect_equal(v(sp[, 1]) - v(plain[, 1]), (tau^2 + 1 / 12) / 49, tolerance = 1e-6, info = paste("tau", tau))
+  }
+  # (4) the RISE RATE: a convolved exponential is the same exponential times a constant, so away from
+  # the edges every weekly ratio is exactly exp(7 r) -- the spread cannot fake a faster or slower rise
+  r <- 0.06; ex <- exp(r * t); dex <- cbind(ex, ex, ex)
+  sp <- jm_spread_cpp(dex, 10, 53L)
+  inner <- 12:40                                   # clear of both edges by more than 7 tau
+  expect_equal(sp[inner + 1, 2] / sp[inner, 2], rep(exp(7 * r), length(inner)), tolerance = 1e-10)
+  # (5) a vanishing tau is no spread at all
+  expect_equal(jm_spread_cpp(daily, 1e-6, 53L), plain, tolerance = 1e-13)
+})
+
+test_that("tau = 0 is the model without spread, and the spread never changes the attack rate", {
+  S <- d$n_season
+  # the C++ takes its untouched no-spread path below 0.05 days; the base-R reference always convolves.
+  # Agreement at a vanishing tau is therefore the check that the short cut is the limit it claims
+  for (v in c(-30, log(0.049), log(0.051))){
+    t2 <- th; t2[2L * S] <- v
+    expect_equal(jm_negll_cpp(t2, d), jm_negll_R(t2, d), tolerance = 1e-10, info = paste("log tau", v))
+  }
+  # continuity across the switch-over, likelihood only (the tau prior is a smooth function of tau)
+  a <- th; a[2L * S] <- log(0.0499); b <- th; b[2L * S] <- log(0.0501)
+  expect_lt(abs(jm_loglik_cpp(a, d) - jm_loglik_cpp(b, d)), 1e-6)
+  # and at real spreads the reference agrees too
+  for (v in log(c(3, 10, 30))){ t2 <- th; t2[2L * S] <- v
+    expect_equal(jm_negll_cpp(t2, d), jm_negll_R(t2, d), tolerance = 1e-10, info = paste("log tau", v)) }
+  # every local copy has the same final size, so the spread moves infections in time, not in number
+  t0 <- th; t0[2L * S] <- -30; t1 <- th; t1[2L * S] <- log(14)
+  expect_identical(jm_fitted_cpp(t0, d)$attack, jm_fitted_cpp(t1, d)$attack)
+  expect_false(identical(jm_fitted_cpp(t0, d)$mu, jm_fitted_cpp(t1, d)$mu))
+})
+
+test_that("an impossible spread is rejected everywhere, and a stale data object is refused", {
+  S <- d$n_season
+  t2 <- th; t2[2L * S] <- log(121)                  # beyond the 120-day cap
+  expect_gte(jm_negll_cpp(t2, d), 1e10)
+  expect_gte(jm_negll_R(t2, d), 1e10)
+  expect_false(is.finite(jm_loglik_cpp(t2, d)))
+  expect_gte(jm_country_negll_cpp(t2, d, 0L), 1e10)
+  expect_error(jm_fitted_cpp(t2, d), "rejected")
+  # a data object from before the spread has a different layout: reading it would put a country's S0
+  # where tau belongs, so the engine must refuse rather than guess
+  stale <- d; stale$tau_by_country <- NULL
+  expect_error(jm_negll_cpp(th, stale), "predates")
+})
+
+test_that("tau by country: its own layout, the same model, and equal taus give the shared likelihood", {
+  set_c <- modifyList(jm_settings(), list(tau_by_country = TRUE))
+  dc <- withr::with_dir(here::here(), jm_build_data(c("DK", "EE"), models_in, demo, set = set_c, verbose = FALSE))
+  tc <- jm_theta0(dc, set_c); nm <- names(tc)
+  expect_equal(dc$n_par, d$n_par + dc$n_country - 1L)          # one tau per country instead of one
+  expect_equal(dc$n_shared, 2L * dc$n_season - 1L)
+  expect_false("log_tau" %in% nm)
+  # each country's tau is the LAST slot of its block, so every fixed position in the block (phi,
+  # the seeds) that the fitter and the flat-line protector index is unchanged
+  bl <- jm_blocks(dc)
+  for (ic in seq_len(dc$n_country))
+    expect_equal(nm[max(bl$local[[ic]])], paste0(dc$countries[ic], ":log_tau"))
+  expect_equal(sort(c(bl$shared, unlist(bl$local))), seq_len(dc$n_par))
+  set.seed(5)
+  for (i in 1:2){
+    t2 <- tc + rnorm(length(tc), 0, 0.2)
+    expect_equal(jm_negll_cpp(t2, dc), jm_negll_R(t2, dc), tolerance = 1e-10)
+  }
+  # no dead slot: each country's tau moves only its own likelihood
+  j <- grep("EE:log_tau", nm); t3 <- tc; t3[j] <- t3[j] + 0.3
+  expect_gt(abs(jm_country_negll_cpp(t3, dc, 1L) - jm_country_negll_cpp(tc, dc, 1L)), 1e-6)
+  expect_equal(jm_country_negll_cpp(t3, dc, 0L), jm_country_negll_cpp(tc, dc, 0L))
+  # the shared model is the by-country model with every tau equal: identical likelihood
+  ts <- th; ts[2L * d$n_season] <- log(9)
+  tc2 <- tc; tc2[grep("log_tau", nm)] <- log(9)
+  tc2[setdiff(seq_along(tc2), grep("log_tau", nm))] <- ts[-(2L * d$n_season)]
+  expect_equal(jm_loglik_cpp(tc2, dc), jm_loglik_cpp(ts, d), tolerance = 1e-12)
+  # and its priors: one per country, each with the declared sd
+  lp <- function(t) -jm_negll_cpp(t, dc) - jm_loglik_cpp(t, dc)
+  a <- tc; a[j] <- a[j] + 2; b <- tc; b[j] <- b[j] - 2
+  expect_equal((lp(a) + lp(b) - 2 * lp(tc)) / 4, -1 / dc$pr_tau_sd^2, tolerance = 1e-6)
 })

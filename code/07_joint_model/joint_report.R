@@ -218,13 +218,20 @@ plot_jm_mechanism = function(fit, ref = NULL){
   stopifnot(s_ix <= S - 1L)
   j = list(x = s_ix, delta = S - 1L + s_ix,
            S0 = base + 1L, c = base + 2L, off_eld = base + 4L, phi = base + 5L,
-           I0 = base + 5L + nsrc + d$cs_pos[i0] + 1L)
+           I0 = base + 5L + nsrc + d$cs_pos[i0] + 1L,
+           tau = if (isTRUE(d$tau_by_country)) base + d$n_local[ic] else 2L * S)
   N = d$N[[ic]]; per = d$rate_per / N
   mu_of = function(theta, grp = 2L){
     m = jm_fitted_cpp(theta, d)$mu[[i0]]
     data.frame(week = seq_len(nrow(m)), value = m[, grp] * per[grp])
   }
   bump = function(slot, by){ t2 = th; t2[slot] = t2[slot] + by; t2 }
+  set_tau = function(v){ t2 = th; t2[j$tau] = v; t2 }
+  # full width at half maximum of a weekly curve, in weeks (linear interpolation at both crossings)
+  fwhm = function(v){ H = max(v); p = which.max(v); n = length(v)
+    a = max(c(0, which(seq_len(n) < p & v < H / 2))); b = min(c(n + 1, which(seq_len(n) > p & v < H / 2)))
+    if (a < 1 || b > n) return(NA_real_)
+    (b - (H / 2 - v[b]) / (v[b - 1] - v[b])) - (a + (H / 2 - v[a]) / (v[a + 1] - v[a])) }
 
   # each panel: the reference curve plus one lower and one higher setting of a single parameter
   panels = list(
@@ -245,7 +252,11 @@ plot_jm_mechanism = function(fit, ref = NULL){
          note = "Also scales the curve -- but shared across countries, so it cannot absorb c."),
     list(key = "off_eld  age reporting, 65+", lo = bump(j$off_eld, -1), hi = bump(j$off_eld, 1),
          lab = c("half", "double"), grp = 3L,
-         note = "Scales ONE age group's curve only (65+ shown). Surveillance, not biology.")
+         note = "Scales ONE age group's curve only (65+ shown). Surveillance, not biology."),
+    list(key = "tau  spread of the wave across the country", lo = set_tau(-30), hi = set_tau(log(14)),
+         lab = c("none", "14 days"),
+         note = sprintf(paste("Lower, rounder, wider: the country's cities are hit at different times. The total and the",
+                              "early rise are unchanged. Fitted: %.1f days."), exp(th[j$tau])))
   )
   # colour by DIRECTION, not by the label: every panel then reads the same way -- blue is the lower
   # setting and orange the higher one, whatever the units of that particular parameter happen to be.
@@ -259,7 +270,7 @@ plot_jm_mechanism = function(fit, ref = NULL){
   # wrap to the panel width, or the note runs off the right edge and the sentence is lost
   notes = data.frame(key = vapply(panels, `[[`, character(1), "key"),
                      note = vapply(panels, function(p)
-                       paste(strwrap(sprintf("%s  (%s / %s)", p$note, p$lab[1], p$lab[2]), width = 46),
+                       paste(strwrap(sprintf("%s  (%s / %s)", p$note, p$lab[1], p$lab[2]), width = 40),
                              collapse = "\n"), character(1)),
                      stringsAsFactors = FALSE)
   rows$key = factor(rows$key, levels = notes$key)
@@ -271,7 +282,7 @@ plot_jm_mechanism = function(fit, ref = NULL){
     geom_line(data = rows %>% filter(dir == "as fitted"), colour = "grey25", linewidth = 1.3) +
     geom_text(data = notes, aes(x = x, y = y, label = note), hjust = 0, vjust = 1.15,
               size = 2.8, colour = "grey30", lineheight = 1.1, inherit.aes = FALSE) +
-    facet_wrap(~ key, scales = "free_y", ncol = 3) +
+    facet_wrap(~ key, scales = "free_y", ncol = 4) +
     scale_colour_manual(values = c(lower = .jm_blue, higher = .jm_orange), name = NULL,
                         labels = c(lower = "the lower setting", higher = "the higher setting")) +
     scale_y_continuous(expand = expansion(mult = c(0.02, 0.55))) +
@@ -291,30 +302,44 @@ plot_jm_mechanism = function(fit, ref = NULL){
   t_x = bump(j$x, 0.35); pk_x = max(mu_of(t_x)$value)
   t_del = bump(j$delta, log(pk_x / base_pk))          # the delta that reaches the same peak
   t_cdel = bump(j$c, log(1.5)); t_cdel[j$delta] = th[j$delta] + log(1 / 1.5)
+  # MIDDLE: two ways to make a wave FATTER, tuned to the same peak and the same width. Spread it over
+  # the country (tau 14 days), or lower S0 by exactly enough to give the same width. Each is scaled by
+  # c back to the fitted peak height.
+  to_peak = function(t2){ t2[j$c] = t2[j$c] + log(base_pk / max(mu_of(t2)$value)); t2 }
+  t_sp = to_peak(set_tau(log(14))); w_sp = fwhm(mu_of(t_sp)$value)
+  shifts = seq(-1.2, 0, by = 0.02)
+  w_s0 = vapply(shifts, function(z) fwhm(mu_of(to_peak(bump(j$S0, z)))$value), numeric(1))
+  z_s0 = shifts[which.min(abs(w_s0 - w_sp))]
+  t_s0 = to_peak(bump(j$S0, z_s0))
+  fat = "same peak, same width: less susceptible vs spread"
   tr = rbind(cbind(mu_of(th),    set = "as fitted",                     pair = "same peak: susceptibility vs visibility"),
              cbind(mu_of(t_x),   set = "x_s +0.35 (more susceptible)",  pair = "same peak: susceptibility vs visibility"),
              cbind(mu_of(t_del), set = sprintf("delta_s +%.2f (more visible)", log(pk_x / base_pk)),
                                                                         pair = "same peak: susceptibility vs visibility"),
+             cbind(mu_of(th),    set = "as fitted",                     pair = fat),
+             cbind(mu_of(t_s0),  set = sprintf("S0 %+.2f logit (less susceptible)", z_s0), pair = fat),
+             cbind(mu_of(t_sp),  set = "tau 14 days (more spread)",     pair = fat),
              cbind(mu_of(th),    set = "as fitted",                     pair = "c x delta held constant"),
              cbind(mu_of(t_cdel), set = "c +50%, visibility /1.5",      pair = "c x delta held constant"))
   tr$set = factor(tr$set, levels = unique(tr$set))
   # pin the facet order to what the caption says: facet_wrap would otherwise sort alphabetically
   # and put "c x delta" on the LEFT, silently contradicting the text
-  tr$pair = factor(tr$pair, levels = c("same peak: susceptibility vs visibility", "c x delta held constant"))
-  cols = c("grey30", .jm_blue, .jm_orange, "#C1541E"); names(cols) = levels(tr$set)
-  ltys = c("solid", "solid", "solid", "22"); names(ltys) = levels(tr$set)
+  tr$pair = factor(tr$pair, levels = c("same peak: susceptibility vs visibility", fat, "c x delta held constant"))
+  cols = c("grey30", .jm_blue, .jm_orange, "#5E8C31", "#8E5BA8", "#C1541E"); names(cols) = levels(tr$set)
+  ltys = c("solid", "solid", "solid", "solid", "solid", "22"); names(ltys) = levels(tr$set)
   ptr = ggplot(tr %>% filter(value > 0.5), aes(week, value, colour = set, linetype = set)) +
     geom_line(linewidth = 1.1) +
-    facet_wrap(~ pair, ncol = 2) +
+    facet_wrap(~ pair, ncol = 3) +
     scale_y_log10() +
     scale_colour_manual(values = cols, name = NULL) +
     scale_linetype_manual(values = ltys, name = NULL) +
     labs(title = "What one wave can and cannot tell apart",
-         subtitle = paste("Log scale, so an exponential rise is a straight line. LEFT: two ways to make a season bigger, tuned",
-                          "to the SAME peak. More susceptible (blue) rises faster and peaks earlier; more visible (orange) is the",
-                          "fitted curve scaled up. The rise rate separates them, and with R0 fixed the rise rate belongs to S0",
-                          "alone -- that is what makes the season decomposition identifiable. RIGHT: reporting level and season",
-                          "visibility give exactly the same curve; only the average-one constraint on visibility separates them.", sep = "\n"),
+         subtitle = paste("Log scale, so an exponential rise is a straight line. LEFT: two ways to make a season bigger, tuned to the SAME",
+                          "peak. More susceptible (blue) rises faster and peaks earlier; more visible (orange) is the fitted curve scaled up.",
+                          "MIDDLE: two ways to make a wave FATTER, tuned to the same peak AND the same width. Less susceptible (green) rises",
+                          "AND decays more slowly; spread over the country (purple) keeps both slopes of the fit and only rounds the top.",
+                          "What separates them is the two tails -- the low weeks at either end, where counts are fewest. RIGHT: reporting",
+                          "level and season visibility give exactly the same curve; only the average-one constraint separates them.", sep = "\n"),
          x = "week of the season", y = "ILI+ per 100 000 (log scale)") +
     .jm_theme(9) + theme(legend.position = "top")
 
@@ -341,6 +366,10 @@ jm_design_spec = function(d){
     "dynamics",    "x_s  season effect on S0",   TRUE,  FALSE, FALSE, S - 1L,      "one per season, added to every country's logit S0; average zero",
     "dynamics",    "sigma  elderly suscept.",   FALSE, FALSE, TRUE,  1,           "one number for everyone",
     "dynamics",    "I0  seed / arrival",        TRUE,  TRUE,  FALSE, d$n_cs,      "free for every wave: sets when it arrives",
+    "dynamics",    "tau  spatial spread",       FALSE, isTRUE(d$tau_by_country), FALSE,
+                   if (isTRUE(d$tau_by_country)) C else 1L,
+                   if (isTRUE(d$tau_by_country)) "one per country: how far apart in time its cities are hit"
+                   else "one number: how far apart in time a country's cities are hit",
     "observation", "c  reporting level",        FALSE, TRUE,  FALSE, C,           "one per surveillance system",
     "observation", "delta  season visibility",  TRUE,  FALSE, FALSE, S - 1L,      "one per season, the last set by the average-one constraint",
     "observation", "off  age reporting",        FALSE, TRUE,  TRUE,  2 * C,       "adults the reference",
@@ -710,7 +739,7 @@ save_jm_report = function(fit, id = NULL, iv = NULL, rec = NULL, dir = "output/j
       "what data there is: every country-season, its source, its observed weeks, and what was excluded")
   put("02_data_features.png", plot_jm_data_features(fit), 14, 10.5,
       "the four features of the data that dictate the model's design -- read before the model")
-  put("03_mechanism.png", plot_jm_mechanism(fit), 13, 11,
+  put("03_mechanism.png", plot_jm_mechanism(fit), 15, 12,
       "how the model works: what each parameter does to a wave, and the two products the design has to break")
   put("04_design_what_varies_where.png", plot_jm_design(fit), 12.5, 6.2,
       "which parameters vary by season, by country, by age, and which are fixed")

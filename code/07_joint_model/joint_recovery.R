@@ -99,7 +99,7 @@ jm_intervals = function(fit, H_post = NULL, level = 0.95){
 jm_profile = function(fit, idx = NULL, n_grid = 7L, span = 3, sweeps = 2L,
                       cores = max(1L, parallel::detectCores() - 1L), verbose = TRUE){
   d = fit$d; th0 = fit$theta; nm = names(th0)
-  if (is.null(idx)) idx = seq_len(2L * d$n_season)              # the shared block by default
+  if (is.null(idx)) idx = jm_blocks(d)$shared                    # the shared block by default
   iv = jm_intervals(fit)
   best = fit$negll
   cut = qchisq(0.95, 1) / 2
@@ -171,6 +171,7 @@ jm_truth_from_prior = function(d, set = jm_settings(), anchor = NULL){
   dev = rnorm(S, 0, set$pr_delta_sd); dev = dev - mean(dev)
   th[S - 1L + seq_len(S - 1)] = dev[seq_len(S - 1)]
   th[2L * S - 1L] = rnorm(1, set$pr_sigma_mean, set$pr_sigma_sd)
+  if (!isTRUE(d$tau_by_country)) th[2L * S] = rnorm(1, set$pr_tau_mean, set$pr_tau_sd)
   for (ic in seq_len(d$n_country)){
     b = d$off_country[ic]
     th[b + 1] = rnorm(1, set$pr_S0_mean, set$pr_S0_sd)
@@ -180,6 +181,7 @@ jm_truth_from_prior = function(d, set = jm_settings(), anchor = NULL){
     th[b + 5 + seq_len(d$n_src[ic])] = th[b + 5 + seq_len(d$n_src[ic])] + rnorm(d$n_src[ic], 0, 0.3)
     is = b + 5 + d$n_src[ic] + seq_len(d$n_cs_of_country[ic])
     th[is] = th[is] + rnorm(length(is), 0, 0.5)                       # jitter the arrival, do not redraw it
+    if (isTRUE(d$tau_by_country)) th[b + d$n_local[ic]] = rnorm(1, set$pr_tau_mean, set$pr_tau_sd)
   }
   names(th) = jm_par_names(d); th
 }
@@ -352,13 +354,14 @@ jm_recovery = function(d, truth_fn = function(i) jm_truth_from_fit(fit0), n_rep 
 jm_recovery_summary = function(rec, d){
   cmp = rec$comparison
   fam = function(nm) ifelse(grepl("^x_", nm), "S0 season effect (shared)",
+        ifelse(grepl("log_tau$", nm), "spatial spread tau",
         ifelse(grepl("^delta_", nm), "season deviation (shared)",
         ifelse(grepl("^log2_sigma", nm), "elderly susceptibility (global)",
         ifelse(grepl(":logit_S0", nm), "S0 (country)",
         ifelse(grepl(":log_c$", nm), "reporting c (country)",
         ifelse(grepl(":off_", nm), "age reporting offset",
         ifelse(grepl(":log_phi", nm), "dispersion phi",
-        ifelse(grepl(":log_b_", nm), "baseline b", "seed I0 (country-season)"))))))))
+        ifelse(grepl(":log_b_", nm), "baseline b", "seed I0 (country-season)")))))))))
   cmp$family = fam(cmp$parameter)
   by_fam = cmp %>% group_by(family) %>%
     summarise(n = n(),

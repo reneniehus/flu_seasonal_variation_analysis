@@ -20,6 +20,8 @@
 //   [S-1 .. 2S-3]      delta_s, s = 1..S-1           season effect on VISIBILITY, log scale, free values;
 //                                                    delta_S = -sum(free), i.e. they average zero
 //   [2S-2]             log2 sigma_eld                one global elderly susceptibility
+//   [2S-1]             log tau                       spatial spread, days (only when d["tau_by_country"]
+//                                                    is FALSE; otherwise each country carries its own)
 //   then per country c, starting at off_country[c]:
 //   +0                 logit S0_c   the country's susceptibility at the average season;
 //                                   logit S0_{c,s} = logit S0_c + x_s
@@ -35,6 +37,20 @@
 //   +4                 log phi_c
 //   +5 .. 4+n_src[c]   log b_{c,src}                 one per data source the country actually has
 //   then n_cs[c]       log I0_{c,s}                  one seed per season of that country
+//   then, only when d["tau_by_country"] is TRUE:
+//                      log tau_c                     that country's own spatial spread, days
+//
+// SPATIAL SPREAD (2026-09-26). A country is not one well-mixed population: its cities are hit at
+// slightly different times. The model keeps ONE local epidemic per country-season and lets the
+// country's many local epidemics be copies of it whose start times are spread N(0, tau^2) days around
+// the modelled one. The national incidence is therefore the local incidence convolved with that
+// normal kernel -- on the DAILY grid, before the weekly aggregation. Three consequences, each exact:
+// the total is unchanged (the kernel sums to one), the mean timing is unchanged (it is symmetric), and
+// the exponential RISE RATE is unchanged (a convolved exponential is the same exponential times a
+// constant, which the seed absorbs). So tau is not a second lever on how fast a wave grows or how big
+// it is: it rounds and widens the peak, and nothing else. tau below 0.05 days is taken as no spread
+// at all, through the untouched original code path, so the model without spread is reproduced bit
+// for bit (the kernel's first off-centre weight there is below 1e-23).
 
 #include <Rcpp.h>
 #include <cmath>
@@ -79,11 +95,12 @@ static inline void simulate_season(int n_weeks, int n_weeks_dyn, const double Cs
                                    double S0, double I0, double gamma,
                                    double ve_inf, double ve_ili, double ve_spread,
                                    int vax_day, double vax_eld,
-                                   double* inc, double* attack){
+                                   double* inc, double* attack, double* daily){
   double Su[A], Iu[A], Sv[A], Iv[A], acc[A];
   for (int a = 0; a < A; ++a){ Su[a] = S0; Iu[a] = I0; Sv[a] = 0.0; Iv[a] = 0.0; }
   const double vax[A] = {0.0, 0.0, vax_eld};      // only the 65+ group is vaccinated
   const double s_spread = 1.0 - ve_spread, e_inf = 1.0 - ve_inf, w_ili = 1.0 - ve_ili;
+  const int D = 7 * n_weeks_dyn;                  // days in the dynamics horizon (daily[] is D x A)
   int day = 0;
   for (int t = 0; t < n_weeks_dyn; ++t){
     for (int a = 0; a < A; ++a) acc[a] = 0.0;    // the accumulator resets every observation week
@@ -105,7 +122,9 @@ static inline void simulate_season(int n_weeks, int n_weeks_dyn, const double Cs
         if (nv > Sv[a]) nv = Sv[a];
         Su[a] -= nu;  Iu[a] += nu - gamma * Iu[a];
         Sv[a] -= nv;  Iv[a] += nv - gamma * Iv[a];
-        acc[a] += nu + w_ili * nv;                // vaccinated infections are less likely to be ILI
+        const double f = nu + w_ili * nv;         // vaccinated infections are less likely to be ILI
+        acc[a] += f;
+        if (daily) daily[(day - 1) + a * D] = f;  // kept only when the spread needs the daily grid
       }
       if (day == vax_day){
         for (int a = 0; a < A; ++a){ const double mv = vax[a] * Su[a]; Su[a] -= mv; Sv[a] += mv; }
@@ -123,9 +142,53 @@ static inline void simulate_season(int n_weeks, int n_weeks_dyn, const double Cs
   for (int a = 0; a < A; ++a) attack[a] = S0 - Su[a] - Sv[a];
 }
 
+// ---- |-spatial spread: the national weekly incidence of many time-shifted local epidemics ----
+// national(t) = sum_k w_k local(t - k), with w_k the mass of N(0, tau^2) in the day bin [k-1/2, k+1/2],
+// and each week the sum of its seven days. Computed from the CUMULATIVE local incidence F, because
+//   sum over a week of national(t) = G(7w) - G(7w - 7),   G(T) = sum_k w_k F(T - k),
+// which costs one kernel pass per week boundary instead of one per day. Outside the simulated horizon
+// the local epidemic is taken as not yet started (F = 0) or over (F = F(D)), i.e. local incidence is
+// zero there -- true at the start by construction, and to many digits at the end of a 53-week season.
+// The kernel is cut at 7 sd, where the dropped mass is ~3e-12, and renormalised.
+static inline void spread_weekly(const double* daily, int D, int n_weeks, double tau, double* inc){
+  const int K = (int)std::ceil(7.0 * tau);
+  std::vector<double> w(2 * K + 1);
+  const double z = 1.0 / (tau * std::sqrt(2.0));
+  // symmetric, and from erfc of POSITIVE arguments, so the far tail is not a difference of two numbers
+  // near one: w_0 = erf(1/2 z), w_k = w_-k = (erfc((k - 1/2) z) - erfc((k + 1/2) z)) / 2
+  w[K] = std::erf(0.5 * z);
+  double sw = w[K];
+  for (int k = 1; k <= K; ++k){
+    const double v = 0.5 * (std::erfc((k - 0.5) * z) - std::erfc((k + 0.5) * z));
+    w[K + k] = v; w[K - k] = v; sw += 2.0 * v;
+  }
+  for (int k = 0; k <= 2 * K; ++k) w[k] /= sw;
+  std::vector<double> F(D + 1), G(n_weeks + 1);
+  for (int a = 0; a < A; ++a){
+    F[0] = 0.0;
+    for (int j = 1; j <= D; ++j) F[j] = F[j - 1] + daily[(j - 1) + a * D];
+    for (int wk = 0; wk <= n_weeks; ++wk){
+      const int T = 7 * wk;
+      double g = 0.0;
+      for (int k = -K; k <= K; ++k){
+        int j = T - k;
+        if (j <= 0) continue;                     // copies that have not started yet
+        if (j > D) j = D;                         // copies that have finished
+        g += w[K + k] * F[j];
+      }
+      G[wk] = g;
+    }
+    for (int t = 0; t < n_weeks; ++t) inc[t + a * n_weeks] = G[t + 1] - G[t];
+  }
+}
+
 // F1: every export must check the length before any read. country_lp indexes up to exactly n_par-1
 // for the last country, so there is no slack and a short theta reads adjacent memory.
 static inline void check_len(const NumericVector& theta, const List& d){
+  // a data object built before the spread existed has a different layout, and reading it with this
+  // one would silently put a country's S0 where tau belongs: refuse it instead
+  if (!d.containsElementNamed("tau_by_country"))
+    stop("this data object predates the spatial-spread parameter tau; rebuild it with jm_build_data()");
   if (theta.size() != as<int>(d["n_par"]))
     stop("theta has the wrong length: %d supplied, %d expected", theta.size(), as<int>(d["n_par"]));
 }
@@ -139,6 +202,7 @@ static inline double dnorm_log(double x, double m, double s){
 struct Shared {
   std::vector<double> xs, dev;                  // xs[s]: logit-scale season effect on S0;
   double sigma_eld;                             // dev[s] = exp(delta_s), the reporting multiplier
+  double log_tau;                               // the shared spread; NaN when each country has its own
 };
 // finiteness of the TRANSFORMED shared values. theta = 800 is a finite number whose exp() is Inf,
 // which then produced Inf*0 = NaN inside the dynamics, so checking theta alone is not enough.
@@ -149,7 +213,7 @@ static inline bool shared_ok(const Shared& sh){
   return true;
 }
 
-static inline Shared read_shared(const double* th, int S){
+static inline Shared read_shared(const double* th, int S, bool tau_shared){
   Shared sh; sh.xs.resize(S); sh.dev.resize(S);
   double sum_x = 0.0, sum_d = 0.0;
   for (int s = 0; s < S - 1; ++s){ sh.xs[s] = th[s]; sum_x += th[s]; }
@@ -157,6 +221,7 @@ static inline Shared read_shared(const double* th, int S){
   for (int s = 0; s < S - 1; ++s){ const double dd = th[S - 1 + s]; sh.dev[s] = std::exp(dd); sum_d += dd; }
   sh.dev[S - 1] = std::exp(-sum_d);             // the sum-to-zero constraint, on the log scale
   sh.sigma_eld = std::exp2(th[2 * S - 2]);
+  sh.log_tau = tau_shared ? th[2 * S - 1] : NA_REAL;
   return sh;
 }
 
@@ -188,6 +253,7 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   const NumericVector N  = N_list[ic];
   const IntegerVector mine = cs_of_country[ic];
   const int base = off_country[ic], nsrc = n_src[ic];
+  const bool tau_by_country = as<bool>(d["tau_by_country"]);
 
   // local parameters
   const double logit_S0_c = th[base + 0];
@@ -196,6 +262,17 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   const double phi   = std::exp(th[base + 4]);
   const double* logb = th + base + 5;
   const double* logI0= th + base + 5 + nsrc;
+  // the spatial spread: the country's own slot (after its seeds), or the shared one
+  const int i_tau = base + 5 + nsrc + (int)mine.size();
+  const double log_tau = tau_by_country ? th[i_tau] : sh.log_tau;
+  const double tau = std::exp(log_tau);
+  // an sd of four months is not a spread of local epidemics, it is no epidemic shape at all, and the
+  // kernel would outgrow the season; reject it like any other impossible value (prior: 3.9 sd away)
+  if (!(tau <= 120.0)){
+    if (want_fit) *fit_out = List::create(_["mu"] = List(0), _["attack"] = NumericMatrix(0, A));
+    return R_NegInf;
+  }
+  const bool spread = tau >= 0.05;
 
   // reporting proportion by age: adults are the reference, so their offset is fixed at zero
   double c_age[A];
@@ -227,7 +304,7 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   }
   const double lg_phi = std::lgamma(phi), log_phi = std::log(phi);
   double lp = 0.0;
-  std::vector<double> inc;
+  std::vector<double> inc, daily;
   List mu_out; NumericMatrix attack_out;
   if (want_fit){ mu_out = List(mine.size()); attack_out = NumericMatrix(mine.size(), A); }
 
@@ -247,8 +324,12 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
     // the dynamics run to the season horizon so attack[] is comparable across country-seasons, while
     // only the nw observed weeks feed the likelihood (see simulate_season)
     const int nw_dyn = attack_weeks > nw ? attack_weeks : nw;
+    if (spread) daily.assign((size_t)7 * nw_dyn * A, 0.0);
     simulate_season(nw, nw_dyn, Cs, beta, S0, I0, gamma, ve_inf, ve_ili, ve_spread, vax_day, vax_eld[ics],
-                    inc.data(), attack);
+                    inc.data(), attack, spread ? daily.data() : nullptr);
+    // the country as a whole: the local wave spread over its cities. attack[] is untouched -- every
+    // local copy has the same final size, so the spread moves infections in time, never in number
+    if (spread) spread_weekly(daily.data(), 7 * nw_dyn, nw, tau, inc.data());
 
     NumericMatrix mu_m;
     if (want_fit){ mu_m = NumericMatrix(nw, A); }
@@ -281,6 +362,7 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   lp += dnorm_log(oe, 0.0, as<double>(d["pr_off_sd"]));
   lp += dnorm_log(th[base + 4], as<double>(d["pr_phi_mean"]), as<double>(d["pr_phi_sd"]));
   for (int k = 0; k < nsrc; ++k) lp += dnorm_log(logb[k], as<double>(d["pr_b_mean"]), as<double>(d["pr_b_sd"]));
+  if (tau_by_country) lp += dnorm_log(th[i_tau], as<double>(d["pr_tau_mean"]), as<double>(d["pr_tau_sd"]));
 
   if (want_fit){ *fit_out = List::create(_["mu"] = mu_out, _["attack"] = attack_out); }
   return lp;
@@ -299,6 +381,8 @@ static double shared_lp(const double* th, const List& d, int S){
   for (int s = 0; s < S - 1; ++s){ lp += dnorm_log(th[S - 1 + s], 0.0, s_dev); sum_d += th[S - 1 + s]; }
   lp += dnorm_log(-sum_d, 0.0, s_dev);
   lp += dnorm_log(th[2 * S - 2], as<double>(d["pr_sigma_mean"]), as<double>(d["pr_sigma_sd"]));
+  if (!as<bool>(d["tau_by_country"]))
+    lp += dnorm_log(th[2 * S - 1], as<double>(d["pr_tau_mean"]), as<double>(d["pr_tau_sd"]));
   return lp;
 }
 
@@ -311,7 +395,7 @@ double jm_negll_cpp(NumericVector theta, List d){
   check_len(theta, d);
   const double* th = theta.begin();
   for (int i = 0; i < theta.size(); ++i) if (!R_finite(th[i])) return 1e10;
-  const Shared sh = read_shared(th, S);
+  const Shared sh = read_shared(th, S, !as<bool>(d["tau_by_country"]));
   if (!shared_ok(sh)) return 1e10;
   double lp = shared_lp(th, d, S);
   for (int ic = 0; ic < C; ++ic){
@@ -332,7 +416,7 @@ double jm_country_negll_cpp(NumericVector theta, List d, int ic){
   if (ic < 0 || ic >= as<int>(d["n_country"])) stop("country index out of range");
   const double* th = theta.begin();
   for (int i = 0; i < theta.size(); ++i) if (!R_finite(th[i])) return 1e10;
-  const Shared sh = read_shared(th, S);
+  const Shared sh = read_shared(th, S, !as<bool>(d["tau_by_country"]));
   if (!shared_ok(sh)) return 1e10;
   const double v = country_lp(th, d, ic, sh, false, nullptr);
   if (!R_finite(v)) return 1e10;
@@ -346,7 +430,7 @@ double jm_loglik_cpp(NumericVector theta, List d){
   const int S = as<int>(d["n_season"]), C = as<int>(d["n_country"]);
   check_len(theta, d);
   const double* th = theta.begin();
-  const Shared sh = read_shared(th, S);
+  const Shared sh = read_shared(th, S, !as<bool>(d["tau_by_country"]));
   if (!shared_ok(sh)) return R_NegInf;
   const double nl = jm_negll_cpp(theta, d);
   // PROPAGATE the rejection instead of stripping priors off the sentinel: subtracting a log-prior
@@ -369,8 +453,23 @@ double jm_loglik_cpp(NumericVector theta, List d){
     for (int k = 0; k < nsrc; ++k) ll -= dnorm_log(th[base + 5 + k], as<double>(d["pr_b_mean"]), as<double>(d["pr_b_sd"]));
     for (int m = 0; m < mine.size(); ++m)
       ll -= dnorm_log(th[base + 5 + nsrc + cs_pos[mine[m]]], as<double>(d["pr_I0_mean"]), as<double>(d["pr_I0_sd"]));
+    if (as<bool>(d["tau_by_country"]))
+      ll -= dnorm_log(th[base + 5 + nsrc + (int)mine.size()], as<double>(d["pr_tau_mean"]), as<double>(d["pr_tau_sd"]));
   }
   return ll;
+}
+
+//' The spatial-spread kernel on its own: daily local incidence (days x 3) in, the country's weekly
+//' incidence (n_weeks x 3) out. The likelihood calls the same function; this export exists so the
+//' test suite can hold the kernel to the properties MODEL.md claims for it (mass, rise rate, width).
+// [[Rcpp::export]]
+NumericMatrix jm_spread_cpp(NumericMatrix daily, double tau, int n_weeks){
+  if (daily.ncol() != A) stop("daily must have one column per age group (3)");
+  if (!(tau > 0.0) || !(tau <= 120.0)) stop("tau must be in (0, 120] days");
+  if (n_weeks < 1 || 7 * n_weeks > daily.nrow()) stop("n_weeks must fit inside the daily series");
+  NumericMatrix out(n_weeks, A);
+  spread_weekly(daily.begin(), daily.nrow(), n_weeks, tau, out.begin());
+  return out;
 }
 
 //' Fitted quantities at a parameter vector: expected counts per country-season and per-age attack
@@ -380,7 +479,7 @@ List jm_fitted_cpp(NumericVector theta, List d){
   const int S = as<int>(d["n_season"]), C = as<int>(d["n_country"]);
   check_len(theta, d);
   const double* th = theta.begin();
-  const Shared sh = read_shared(th, S);
+  const Shared sh = read_shared(th, S, !as<bool>(d["tau_by_country"]));
   if (!shared_ok(sh))
     stop("cannot compute fitted values: the shared block is not usable (a season effect or the "
          "elderly susceptibility is non-finite or negative)");
@@ -393,7 +492,8 @@ List jm_fitted_cpp(NumericVector theta, List d){
     // a rejected country leaves an EMPTY result; indexing it below would be undefined behaviour
     if (!R_finite(v))
       stop("cannot compute fitted values: country %d is rejected by the likelihood (its dispersion "
-           "phi exceeds 1e8, or its contact matrix has no positive spectral radius)", ic + 1);
+           "phi exceeds 1e8, its spread tau exceeds 120 days, or its contact matrix has no positive "
+           "spectral radius)", ic + 1);
     const List mu = fit["mu"]; const NumericMatrix at = fit["attack"];
     const IntegerVector mine = cs_of_country[ic];
     for (int m = 0; m < mine.size(); ++m){
