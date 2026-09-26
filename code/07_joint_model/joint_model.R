@@ -23,17 +23,12 @@ jm_settings = function(){
     gamma_per_day = 0.2777778,     # 3.6-day mean infectious period, from the project notes
     ve_inf = 0.25, ve_ili = 0.20, ve_spread = 0.20,
     rate_per = 1e5, vax_day = 62L, # the 65+ vaccination pulse, 1 October
-    # R0 IS FIXED, NOT FITTED (owner, 2026-09-25). Transmissibility and susceptibility enter the rise
-    # rate as a product, so one wave identifies only their product; pinning R0 from the literature
-    # makes S0 the single sensor of "how easily did this season spread here", and any real
-    # season-to-season transmissibility variation is absorbed into S0's season effect by design.
+    # R0 IS FIXED, NOT FITTED (owner, 2026-09-25/26). Transmissibility and susceptibility enter the
+    # rise rate as a product, so one wave identifies only their product, and a model comparison
+    # (MODEL.md) showed the data cannot say which of the two varies between seasons or countries.
+    # Which one senses is therefore an informed judgement, not a data result: R0 is pinned from the
+    # literature and S0 is a deliberately BLUNT sensor of susceptibility and infectivity together.
     R0_fixed = 1.5,
-    # THE SENSING SWITCH (2026-09-25 model comparison). Which quantity carries the season effect and
-    # which the country effect, each "S0" or "R0". The working model is S0/S0. Whatever carries no
-    # effect is pinned at its anchor: R0_fixed above, S0_fixed here. Same layout and parameter count
-    # in every setting, so the four combinations compare by likelihood alone.
-    season_on = "S0", country_on = "S0",
-    S0_fixed = 0.75,
     # priors, all on the unconstrained scale the fit works in
     pr_x_sd = 0.5,                            # season effect on logit S0, centred on zero. At S0 ~ 0.8
                                               # one sd is ~ +/-0.09 on S0 itself; wide enough for the
@@ -41,11 +36,6 @@ jm_settings = function(){
                                               # enough to close the S0 -> 1 escape
     pr_S0_mean = qlogis(0.75), pr_S0_sd = 1,  # the COUNTRY level of logit S0 (the mean of the two-way
                                               # decomposition lives here, not in a separate slot)
-    # the R0-side counterparts, used only when the switch puts an effect on R0. Both weak: the
-    # comparison is by likelihood, and the priors must not be what decides it. r_s at 0.15 on the log
-    # scale is the same width the previous fitted-R0_s model used; log R0_c at 0.3 spans 0.8-2.7.
-    pr_R0c_mean = log(1.5), pr_R0c_sd = 0.3,
-    pr_r_sd = 0.15,
     pr_sigma_mean = 1, pr_sigma_sd = 0.5,     # log2 sigma_eld ~ N(1, .5): centre 2x, 95% band 1.0-4.0x
     pr_delta_sd = 0.5,                        # season observation deviation, constrained to average 0
     pr_off_sd = 1,                            # log2 age reporting offsets
@@ -238,8 +228,7 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
     rates = unlist(lapply(cds, `[[`, "rates"), recursive = FALSE),
     gamma = set$gamma_per_day, ve_inf = set$ve_inf, ve_ili = set$ve_ili,
     ve_spread = set$ve_spread, rate_per = set$rate_per, vax_day = set$vax_day,
-    R0_fixed = set$R0_fixed, S0_fixed = set$S0_fixed,
-    season_on = set$season_on, country_on = set$country_on,
+    R0_fixed = set$R0_fixed,
     # The DYNAMICS horizon, distinct from the observation windows. Each country-season is observed for
     # however long its surveillance series runs (33 to 53 weeks here), but the attack rate has to mean
     # the same thing in every cell to be comparable across them and against cohort evidence, so the
@@ -269,12 +258,10 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
 # ---- |-the parameter vector: names, index blocks, starting values ----
 jm_par_names = function(d){
   S = d$n_season
-  sea = if (identical(d$season_on, "R0")) "r_" else "x_"          # r_s on log R0, x_s on logit S0
-  cty = if (identical(d$country_on, "R0")) ":log_R0" else ":logit_S0"
-  nm = c(paste0(sea, head(d$seasons, S - 1)), paste0("delta_", head(d$seasons, S - 1)), "log2_sigma_eld")
+  nm = c(paste0("x_", head(d$seasons, S - 1)), paste0("delta_", head(d$seasons, S - 1)), "log2_sigma_eld")
   for (ic in seq_len(d$n_country)){
     cc = d$countries[ic]
-    nm = c(nm, paste0(cc, c(cty, ":log_c", ":off_young", ":off_eld", ":log_phi")),
+    nm = c(nm, paste0(cc, c(":logit_S0", ":log_c", ":off_young", ":off_eld", ":log_phi")),
            paste0(cc, ":log_b_", d$sources[[ic]]),
            paste0(cc, ":log_I0_", d$seasons[d$cs_season[d$cs_of_country[[ic]] + 1L] + 1L]))
   }
@@ -302,7 +289,7 @@ jm_theta0 = function(d, set = jm_settings()){
     # is NA, which would put NA into log_b and leave that whole block silently un-optimised
     floor_r = max(c(as.numeric(quantile(rate_all[rate_all > 0], 0.10, na.rm = TRUE)), 1e-3), na.rm = TRUE)
     c0 = min(max(peak / d$rate_per / 0.02, 1e-4), 1)
-    th[base + 1] = if (identical(d$country_on, "R0")) log(set$R0_fixed) else qlogis(0.80)
+    th[base + 1] = qlogis(0.80)
     th[base + 2] = log(c0)
     th[base + 3] = 0; th[base + 4] = 0
     th[base + 5] = set$pr_phi_mean
@@ -611,10 +598,8 @@ jm_unpack = function(th, d){
   S = d$n_season
   x_free = th[seq_len(S - 1)]; dev_free = th[S - 1L + seq_len(S - 1)]
   x = c(x_free, -sum(x_free))
-  sea_S0 = !identical(d$season_on, "R0"); cty_S0 = !identical(d$country_on, "R0")
-  out = list(season_on = if (sea_S0) "S0" else "R0", country_on = if (cty_S0) "S0" else "R0",
-             R0 = unname(d$R0_fixed), S0_fixed = unname(d$S0_fixed),   # the anchors
-             x = setNames(x, d$seasons),           # the season effect, on logit S0 or on log R0
+  out = list(R0 = unname(d$R0_fixed),                 # fixed, reported for convenience
+             x = setNames(x, d$seasons),           # the season effect on logit S0
              delta = setNames(c(dev_free, -sum(dev_free)), d$seasons),
              sigma_eld = unname(2^th[2L * S - 1L]))
   cty = lapply(seq_len(d$n_country), function(ic){
@@ -622,15 +607,10 @@ jm_unpack = function(th, d){
     ss = d$cs_season[ics] + 1L; sn = d$seasons[ss]
     # unname the scalars: they would otherwise carry the parameter's own label ("DK:logit_S0") and
     # leak it into every data frame, summary column and plot label built from them.
-    # Each quantity is its anchor unless it carries an effect: the country's LEVEL (at the average
-    # season) and its per-season value, for both S0 and R0
-    logit_S0_c = if (cty_S0) th[base + 1] else qlogis(d$S0_fixed)
-    log_R0_c   = if (cty_S0) log(d$R0_fixed) else th[base + 1]
+    # S0 is the country's LEVEL at the average season; S0_season its value in each of its seasons
+    logit_S0_c = th[base + 1]
     list(S0 = unname(plogis(logit_S0_c)),
-         # a zero PER SEASON when the effect lives elsewhere, so the vector keeps one value per season
-         S0_season = setNames(plogis(logit_S0_c + if (sea_S0) x[ss] else 0 * ss), sn),
-         R0 = unname(exp(log_R0_c)),
-         R0_season = setNames(exp(log_R0_c + if (sea_S0) 0 * ss else x[ss]), sn),
+         S0_season = setNames(plogis(logit_S0_c + x[ss]), sn),
          c = unname(exp(th[base + 2])),
          off_young = unname(th[base + 3]), off_eld = unname(th[base + 4]),
          phi = unname(exp(th[base + 5])),
@@ -667,11 +647,8 @@ jm_summary_season = function(fit){
   # S0_typical: the season's susceptibility for a typical country, i.e. at the median country level.
   # This is the number to read: x is a logit shift and hard to picture on its own.
   med_logit = median(vapply(p$country, function(q) qlogis(q$S0), numeric(1)))
-  med_logR0 = median(vapply(p$country, function(q) log(q$R0), numeric(1)))
-  sea_S0 = p$season_on == "S0"
   data.frame(season = d$seasons, x = unname(p$x),
-             S0_typical = plogis(med_logit + if (sea_S0) unname(p$x) else 0),
-             R0_typical = exp(med_logR0 + if (sea_S0) 0 else unname(p$x)),
+             S0_typical = plogis(med_logit + unname(p$x)),
              deviation = unname(p$delta), reporting_mult = exp(unname(p$delta)),
              n_country = vapply(seq_len(d$n_season), function(s) per(s, length), integer(1)),
              obs_cells = vapply(seq_len(d$n_season), function(s)
@@ -694,15 +671,12 @@ jm_negll_R = function(th, d){
   dev = exp(c(dev_free, -sum(dev_free)))
   sigma = c(1, 1, 2^th[2L * S - 1L])
   dn = function(x, m, s) -0.5 * ((x - m) / s)^2 - log(s) - 0.5 * log(2 * pi)
-  sea_S0 = !identical(d$season_on, "R0"); cty_S0 = !identical(d$country_on, "R0")
-  lp = sum(dn(xs, 0, if (sea_S0) d$pr_x_sd else d$pr_r_sd)) +
+  lp = sum(dn(xs, 0, d$pr_x_sd)) +
        sum(dn(c(dev_free, -sum(dev_free)), 0, d$pr_delta_sd)) +
        dn(th[2L * S - 1L], d$pr_sigma_mean, d$pr_sigma_sd)
   for (ic in seq_len(d$n_country)){
     base = d$off_country[ic]; nsrc = d$n_src[ic]
-    slot0 = th[base + 1]; cc = exp(th[base + 2])
-    logit_S0_c = if (cty_S0) slot0 else qlogis(d$S0_fixed)
-    log_R0_c   = if (cty_S0) log(d$R0_fixed) else slot0
+    logit_S0_c = th[base + 1]; cc = exp(th[base + 2])
     c_age = cc * 2^c(th[base + 3], 0, th[base + 4])
     phi = exp(th[base + 5])
     if (!(phi <= 1e8)) return(1e10)          # the phi hole: rejected, exactly as the .cpp does
@@ -713,8 +687,8 @@ jm_negll_R = function(th, d){
     N = d$N[[ic]]
     for (ics in d$cs_of_country[[ic]] + 1L){
       y = d$y[[ics]]; nw = nrow(y); s = d$cs_season[ics] + 1L
-      beta = exp(log_R0_c + if (sea_S0) 0 else xs[s]) * d$gamma
-      S0 = plogis(logit_S0_c + if (sea_S0) xs[s] else 0)   # this country, this season
+      beta = d$R0_fixed * d$gamma
+      S0 = plogis(logit_S0_c + xs[s])                      # this country, this season
       Su = rep(S0, A); Iu = rep(I0v[d$cs_pos[ics] + 1L], A); Sv = rep(0, A); Iv = rep(0, A)
       vax = c(0, 0, d$vax_eld[ics]); inc = matrix(0, nw, A); day = 0L
       for (t in seq_len(nw)){
@@ -742,8 +716,7 @@ jm_negll_R = function(th, d){
                     y[ok] * (log(mu[ok]) - log(phi + mu[ok]))) - d$lgamma_y1[ics]
       lp = lp + dn(log(I0v[d$cs_pos[ics] + 1L]), d$pr_I0_mean, d$pr_I0_sd)
     }
-    lp = lp + (if (cty_S0) dn(th[base + 1], d$pr_S0_mean, d$pr_S0_sd)
-               else dn(th[base + 1], d$pr_R0c_mean, d$pr_R0c_sd)) +
+    lp = lp + dn(th[base + 1], d$pr_S0_mean, d$pr_S0_sd) +
          dn(th[base + 2], d$pr_c_mean, d$pr_c_sd) +
          dn(th[base + 3], 0, d$pr_off_sd) + dn(th[base + 4], 0, d$pr_off_sd) +
          dn(th[base + 5], d$pr_phi_mean, d$pr_phi_sd) +
@@ -768,8 +741,6 @@ jm_identifiability = function(fit, verbose = TRUE){
   secs = as.numeric(difftime(Sys.time(), t0, units = "secs"))
   S = d$n_season
   fam = ifelse(grepl("^x_", nm), "S0 season effect (shared)",
-        ifelse(grepl("^r_", nm), "R0 season effect (shared)",
-        ifelse(grepl(":log_R0$", nm), "R0 (country)",
         ifelse(grepl("^delta_", nm), "season deviation (shared)",
         ifelse(grepl("log2_sigma", nm), "elderly susceptibility (global)",
         ifelse(grepl(":logit_S0", nm), "S0 (country)",
@@ -777,10 +748,8 @@ jm_identifiability = function(fit, verbose = TRUE){
         ifelse(grepl(":off_", nm), "age reporting offset",
         ifelse(grepl(":log_phi", nm), "dispersion phi",
         ifelse(grepl(":log_b_", nm), "baseline b",
-        ifelse(grepl(":log_I0_", nm), "seed I0 (country-season)", nm)))))))))))
+        ifelse(grepl(":log_I0_", nm), "seed I0 (country-season)", nm)))))))))
   pr_sd = ifelse(grepl("^x_", nm), d$pr_x_sd,
-          ifelse(grepl("^r_", nm), d$pr_r_sd,
-          ifelse(grepl(":log_R0$", nm), d$pr_R0c_sd,
           ifelse(grepl("^delta_", nm), d$pr_delta_sd,
           ifelse(grepl("log2_sigma", nm), d$pr_sigma_sd,
           ifelse(grepl(":logit_S0", nm), d$pr_S0_sd,
@@ -788,7 +757,7 @@ jm_identifiability = function(fit, verbose = TRUE){
           ifelse(grepl(":off_", nm), d$pr_off_sd,
           ifelse(grepl(":log_phi", nm), d$pr_phi_sd,
           ifelse(grepl(":log_b_", nm), d$pr_b_sd,
-          ifelse(grepl(":log_I0_", nm), d$pr_I0_sd, NA_real_)))))))))))
+          ifelse(grepl(":log_I0_", nm), d$pr_I0_sd, NA_real_)))))))))
   e_lik = eigen(H_lik, symmetric = TRUE, only.values = TRUE)$values
   e_post = eigen(H_post, symmetric = TRUE, only.values = TRUE)$values
   V_post = tryCatch(solve(H_post), error = function(e) NULL)

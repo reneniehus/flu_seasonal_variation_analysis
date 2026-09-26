@@ -44,12 +44,10 @@ suppressMessages({library(dplyr); library(tidyr)})
 # pushing interval endpoints through it is exact for quantiles.
 jm_par_kind = function(nm)
   ifelse(grepl("^x_", nm), "identity",
-  ifelse(grepl("^r_", nm), "identity",
-  ifelse(grepl(":log_R0$", nm), "exp",
   ifelse(grepl("^delta_", nm), "identity",
   ifelse(grepl("^log2_sigma", nm), "pow2",
   ifelse(grepl(":logit_S0", nm), "plogis",
-  ifelse(grepl(":off_", nm), "pow2", "exp")))))))
+  ifelse(grepl(":off_", nm), "pow2", "exp")))))
 jm_par_tr = function(x, kind)
   ifelse(kind == "exp", exp(x),
   ifelse(kind == "plogis", plogis(x),
@@ -167,7 +165,7 @@ jm_truth_from_prior = function(d, set = jm_settings(), anchor = NULL){
   # wide prior would put the wave outside the observation window and test nothing.
   th = if (is.null(anchor)) jm_theta0(d, set) else anchor
   S = d$n_season
-  xs = rnorm(S, 0, if (identical(d$season_on, "R0")) set$pr_r_sd else set$pr_x_sd)
+  xs = rnorm(S, 0, set$pr_x_sd)
   xs = xs - mean(xs)                                                  # both season-effect sets average zero
   th[seq_len(S - 1)] = xs[seq_len(S - 1)]
   dev = rnorm(S, 0, set$pr_delta_sd); dev = dev - mean(dev)
@@ -175,8 +173,7 @@ jm_truth_from_prior = function(d, set = jm_settings(), anchor = NULL){
   th[2L * S - 1L] = rnorm(1, set$pr_sigma_mean, set$pr_sigma_sd)
   for (ic in seq_len(d$n_country)){
     b = d$off_country[ic]
-    th[b + 1] = if (identical(d$country_on, "R0")) rnorm(1, set$pr_R0c_mean, set$pr_R0c_sd)
-                else rnorm(1, set$pr_S0_mean, set$pr_S0_sd)
+    th[b + 1] = rnorm(1, set$pr_S0_mean, set$pr_S0_sd)
     th[b + 2] = th[b + 2] + rnorm(1, 0, 0.3)                          # around the data-driven level
     th[b + 3] = rnorm(1, 0, set$pr_off_sd); th[b + 4] = rnorm(1, 0, set$pr_off_sd)
     th[b + 5] = rnorm(1, set$pr_phi_mean, 0.4)
@@ -355,15 +352,13 @@ jm_recovery = function(d, truth_fn = function(i) jm_truth_from_fit(fit0), n_rep 
 jm_recovery_summary = function(rec, d){
   cmp = rec$comparison
   fam = function(nm) ifelse(grepl("^x_", nm), "S0 season effect (shared)",
-        ifelse(grepl("^r_", nm), "R0 season effect (shared)",
-        ifelse(grepl(":log_R0$", nm), "R0 (country)",
         ifelse(grepl("^delta_", nm), "season deviation (shared)",
         ifelse(grepl("^log2_sigma", nm), "elderly susceptibility (global)",
         ifelse(grepl(":logit_S0", nm), "S0 (country)",
         ifelse(grepl(":log_c$", nm), "reporting c (country)",
         ifelse(grepl(":off_", nm), "age reporting offset",
         ifelse(grepl(":log_phi", nm), "dispersion phi",
-        ifelse(grepl(":log_b_", nm), "baseline b", "seed I0 (country-season)"))))))))))
+        ifelse(grepl(":log_b_", nm), "baseline b", "seed I0 (country-season)"))))))))
   cmp$family = fam(cmp$parameter)
   by_fam = cmp %>% group_by(family) %>%
     summarise(n = n(),

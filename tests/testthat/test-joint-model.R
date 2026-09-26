@@ -770,52 +770,17 @@ test_that("the fit is deterministic and independent of the core count", {
   expect_equal(f1$theta, f3$theta, tolerance = 1e-10)
 })
 
-# ---- the sensing switch: four models, one layout ----
-test_that("the sensing switch gives four models with one layout, each matching its base-R mirror", {
-  # Season and country effects can each sit on S0 or on R0 (d$season_on, d$country_on). The layout
-  # and the parameter count are identical in every setting -- only the meaning of the season slots
-  # and of the country's first slot changes -- so the four combinations compare by likelihood alone.
-  # Every combination must agree with the base-R reference, and the S0/S0 default must be exactly
-  # the model that existed before the switch did.
-  source(here::here("code/07_joint_model/joint_recovery.R"))
-  set.seed(4)
-  ref <- NULL
-  for (so in c("S0", "R0")) for (co in c("S0", "R0")){
-    set <- modifyList(jm_settings(), list(season_on = so, country_on = co))
-    dd <- withr::with_dir(here::here(), jm_build_data(c("DK", "EE"), models_in, demo, set = set, verbose = FALSE))
-    t0 <- jm_theta0(dd, set); nm <- jm_par_names(dd)
-    expect_equal(dd$n_par, d$n_par, info = paste(so, co))          # same count as the working model
-    expect_equal(length(nm), dd$n_par, info = paste(so, co))
-    expect_equal(jm_negll_cpp(t0, dd), jm_negll_R(t0, dd), tolerance = 1e-10, info = paste(so, co))
-    for (i in 1:3){
-      t2 <- t0 + rnorm(length(t0), 0, 0.2)
-      expect_equal(jm_negll_cpp(t2, dd), jm_negll_R(t2, dd), tolerance = 1e-10, info = paste(so, co))
-    }
-    expect_true(is.finite(jm_loglik_cpp(t0, dd)), info = paste(so, co))
-    # the names say what the slots mean
-    expect_match(nm[1], if (so == "R0") "^r_" else "^x_")
-    expect_match(nm[2L * dd$n_season], if (co == "R0") ":log_R0$" else ":logit_S0$")
-    # and the quantity that carries no effect is pinned at its anchor for every cell
-    p <- jm_unpack(t0, dd)
-    if (co == "S0") expect_equal(p$country$DK$R0, set$R0_fixed) else expect_equal(p$country$DK$S0, set$S0_fixed)
-    if (so == "S0") expect_true(all(abs(diff(p$country$DK$R0_season)) < 1e-12)) else
-                    expect_true(all(abs(diff(p$country$DK$S0_season)) < 1e-12))
-    # the shared-prior sd follows the scale the season effect lives on
-    lp <- function(t) -jm_negll_cpp(t, dd) - jm_loglik_cpp(t, dd)
-    h <- 1; a <- t0; a[1] <- a[1] + h; b <- t0; b[1] <- b[1] - h
-    expect_equal((lp(a) + lp(b) - 2 * lp(t0)) / h^2,
-                 -2 / (if (so == "R0") dd$pr_r_sd else dd$pr_x_sd)^2, tolerance = 1e-6, info = paste(so, co))
-    if (so == "S0" && co == "S0") ref <- jm_negll_cpp(t0, dd)
-  }
-  # the default IS the working model
-  expect_equal(jm_negll_cpp(th, d), ref, tolerance = 1e-12)
-  expect_identical(jm_settings()$season_on, "S0"); expect_identical(jm_settings()$country_on, "S0")
-  # and the report writer refuses a non-working-model fit rather than mislabelling its figures
-  suppressMessages(source(here::here("code/07_joint_model/joint_report.R")))
-  set <- modifyList(jm_settings(), list(season_on = "R0", country_on = "R0"))
-  dd <- withr::with_dir(here::here(), jm_build_data(c("DK", "EE"), models_in, demo, set = set, verbose = FALSE))
-  fr <- jm_fit(dd, max_sweeps = 1L, cores = 1, verbose = FALSE)
-  expect_error(save_jm_report(fr, dir = withr::local_tempdir()), "season_on = R0")
+# ---- R0 is fixed; S0 is the one sensor ----
+test_that("R0 is a fixed input the likelihood actually uses, and S0 is the only sensor", {
+  # S0 is a deliberately blunt sensor of susceptibility AND infectivity (MODEL.md). The pin must be
+  # read from the data object by both implementations -- not hard-coded in one of them -- and no
+  # parameter may carry R0.
+  expect_false(any(grepl("R0", jm_par_names(d))))
+  expect_null(jm_settings()$season_on); expect_null(jm_settings()$country_on)
+  d2 <- d; d2$R0_fixed <- 1.7
+  expect_equal(jm_negll_cpp(th, d2), jm_negll_R(th, d2), tolerance = 1e-10)
+  expect_gt(abs(jm_negll_cpp(th, d2) - jm_negll_cpp(th, d)), 1)
+  expect_equal(jm_unpack(th, d2)$R0, 1.7)
 })
 
 # ---- the phi hole: a defect the C++ and its mirror SHARED, so the identity test could not see it ----

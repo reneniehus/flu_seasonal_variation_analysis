@@ -124,10 +124,8 @@ code/07_joint_model/           THE WORKING MODEL (branch flu_comp_model): all co
                                diagnostics), joint_recovery.R (intervals; simulate-and-recover, the
                                misspecification arms that make the test able to FAIL, and the driver
                                hook for the learning layer), joint_report.R (the default numbered
-                               figure set), run_joint_model.R, run_joint_recovery.R;
-                               run_model_comparison.R + compare_inference.R + plot_model_comparison.R
-                               (S0-sensing vs R0-sensing: four models on one layout, inference with
-                               the wave as the unit, figure 17)
+                               figure set), run_joint_model.R, run_joint_recovery.R. (The
+                               S0-vs-R0 sensing comparison, figure 17, lives at commit 7b04681.)
 code/06_comp_model/            the compartmental PILOT that preceded it, kept for its assumption
                                record and its data layer (build_comp_data is still used):
                                ASSUMPTIONS.md (every assumption, with provenance and evidence),

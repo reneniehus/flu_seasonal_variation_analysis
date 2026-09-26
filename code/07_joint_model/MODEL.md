@@ -49,8 +49,10 @@ keeps its rank across seasons, so the level has to be a **country** property —
 not an epidemiological one. Seasons rise and fall **together** across Europe once that country level is
 divided out, which is what licenses one Europe-wide season effect on each quantity. Transmissibility
 and susceptibility enter a wave's rise rate as a **product** and are indistinguishable from one wave,
-so one of them is pinned: `R0` is fixed and **susceptibility is the single sensor of how easily a
-season spread**. It is decomposed additively on the logit scale into a **country level** `S0_c`
+so one of them is pinned: `R0` is fixed and **`S0` is the single, deliberately blunt sensor of how
+easily a wave spread** -- it reads susceptibility and infectivity together and does not try to split
+them. That choice is an informed judgement, not a data result: a model comparison (below) showed the
+data cannot tell a season or country effect on `S0` from one on `R0`. `S0` is decomposed additively on the logit scale into a **country level** `S0_c`
 (varying between countries, the same across that country's seasons) and a **season effect** `x_s`
 (varying between seasons, the same across countries, constrained to average zero). The elderly's
 relative susceptibility per contact is **assumed the same everywhere**, one number, because it is
@@ -81,10 +83,10 @@ season: more susceptible, or more visible?* -- it does answer: the posterior cor
 two season effects is only 0.27 (max 0.31 over seasons). Two limits are measured rather than asserted:
 the deterministic mean needs about 2.6x more observation noise than the data's own week-to-week
 scatter can explain, so some of what the model calls measurement error is really misfit; and the
-country susceptibility **ranking is conditional on transmissibility genuinely being equal across
-countries** -- on simulated data where countries' true R0 differed by 10% that ranking fell from 0.93
-to 0.01, because with R0 pinned a real transmissibility difference has nowhere to go but `S0_c`.
-Season-level conclusions survive that test; the country ranking does not. And a **model comparison**
+country ranking of `S0_c` is **not a ranking of immunity**: on simulated data where countries' true
+R0 differed by 10%, the ranking of the pure susceptibility component fell from 0.93 to 0.01, because
+with R0 pinned a real transmissibility difference lands in `S0_c` -- which is exactly what a blunt
+sensor is meant to do, and why it must be read as "how easily influenza spread here". A **model comparison**
 asks where the variation prefers to live -- in the susceptible pool or in transmissibility -- by
 moving the season effect, the country effect, or both from `S0` onto `R0` in the same 181-parameter
 layout. The raw log-likelihood favours `R0` by 10-12 nats, but that number counts autocorrelated
@@ -92,8 +94,9 @@ weeks as if independent. With the **wave as the unit**, the preference is not th
 favour `R0` (sign test p = 0.28), every cluster-bootstrap interval on the total spans zero, and the
 raw gap is carried by Croatia and 2025/2026 alone -- the cells where this model's `S0` presses its
 ceiling of 1 at `R0 = 1.5`. Pinning `R0 = 1.7` inside this model recovers 95% of that gap with the
-country ranking preserved (rank correlation 0.99). **The data do not distinguish the two mechanisms**; the `S0` model stays
-by decision, and what the comparison actually found is that 1.5 is a ceiling, not a constant.
+country ranking preserved (rank correlation 0.99). **The data do not distinguish the two mechanisms**, so the choice is imposed
+by judgement (owner, 2026-09-26): R0 fixed, `S0` the blunt sensor. The comparison's by-product is that
+at 1.5 the sensor saturates (`S0` near 1) in 8 of 85 cells.
 
 ## What was cut relative to the compartmental pilot, and why
 
@@ -175,7 +178,9 @@ plus whatever transmissibility differences the demography and mixing would have 
 holds across seasons for `x_s`: a genuinely more transmissible strain (H3N2 over H1N1) lands in `x_s`
 as "more susceptible". This is the project's founding caveat (`decisions.md`, "Fix R0 from the
 literature") and it is now the design rather than an aside. **Read `S0_c` and `x_s` as "how easily
-influenza spread here / this season", not as a pure immunity measure.**
+influenza spread here / this season", not as a pure immunity measure.** This is the design, adopted by
+judgement after the data could not separate the two (next-but-one section): `S0` is a blunt sensor of
+susceptibility and infectivity together, and no parameter in the model carries R0.
 
 **On the visibility side the age structure IS country-specific, correctly.** Age-specific reporting
 (`off_c,young`, `off_c,eld`) varies by country, and the pyramid enters the expected count through the
@@ -272,6 +277,12 @@ countries on truncated grids, so read that endpoint with its sample size.
 
 ## Where does the variation live: in `S0` or in `R0`? (model comparison, 2026-09-25)
 
+**Outcome (owner, 2026-09-26): the data cannot decide, so judgement does.** R0 stays fixed and `S0`
+is a blunt sensor of susceptibility and infectivity. The sensing switch that made this comparison
+possible has been removed from the code to keep the model simple; the comparison is reproducible from
+commit `7b04681` (`run_model_comparison.R`, `compare_inference.R`, `plot_model_comparison.R`). What
+follows is the evidence behind the decision.
+
 **The question.** The working model senses season and country with the susceptible pool:
 `logit S0_{c,s} = S0_c + x_s`, `R0 = 1.5`. The alternative senses them with transmissibility:
 `log R0_{c,s} = R0_c + r_s`, `S0 = 0.75`. The two are the same layout with one anchor and one fitted
@@ -280,8 +291,7 @@ independently, giving four models: `S0/S0` (working), `R0/S0`, `S0/R0`, `R0/R0` 
 Same data, same likelihood, not nested: a likelihood comparison, not a test. What the likelihood
 scores is shape: an effect on `S0` changes how fast a wave rises *and* how many are left to infect
 (a deeper pool decays differently); an effect on `R0` changes the speed only. Figure 17
-(`output/joint_model/17_model_comparison.png`); scripts `run_model_comparison.R`,
-`compare_inference.R`, `plot_model_comparison.R`.
+(`output/joint_model/17_model_comparison.png`, produced at commit `7b04681`).
 
 **The raw numbers, and why they overstate.**
 
@@ -330,11 +340,11 @@ of at most 100% susceptibles can at `R0 = 1.5`.
 **Verdict.** The data do not distinguish sensing with `S0` from sensing with `R0`: a rise-rate
 difference can be booked to either, and the shape signal that separates them is worth a few nats
 spread over 85 waves, pointing slightly to `S0` in the typical wave and strongly to `R0` only where
-`S0` has run out of room. The working model stays `S0/S0` by decision. What the comparison did
-establish is that **1.5 is a ceiling, not a constant**: it binds in 8 of 85 cells, and a pin of 1.7
-frees every cell (no `S0_{c,s}` above 0.90) at the cost of every `S0_c` moving down (Croatia 0.97 to
-0.86). Whether to raise it is the owner's call; the composite reading of `S0` (section on R0 in a
-country) is the same at either value.
+`S0` has run out of room. The model stays `S0/S0` by judgement. What the comparison did
+establish is that **the sensor saturates at `R0 = 1.5`**: `S0` presses 1 in 8 of 85 cells, and a pin
+of 1.7 frees every cell (no `S0_{c,s}` above 0.90) at the cost of every `S0_c` moving down (Croatia
+0.97 to 0.86), ranking unchanged. The pin stays 1.5 until the owner decides otherwise; the blunt
+reading of `S0` is the same at either value.
 
 **What the comparison also found.** The first `R0 = 1.6` refit reported a log-likelihood of +3 000 000:
 Spain's dispersion had run to `log phi = 44.7`, where `lgamma(y + phi) - lgamma(phi)` is catastrophic

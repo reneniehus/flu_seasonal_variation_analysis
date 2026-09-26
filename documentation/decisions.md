@@ -969,3 +969,20 @@ new test compares the likelihood against R's `dnbinom` -- an independent third i
 across the legitimate range and checks the rejection at every entry point. `jm_fitted_cpp` also now
 stops on a rejected country instead of indexing an empty result. No earlier fit was in that region
 (fitted `phi` 0.15-1.8, prior centre 4), so no reported number changes.
+
+## 2026-09-26 -- R0 fixed by judgement; S0 is a blunt sensor; the switch removed
+
+**Owner decision.** The comparison showed the data cannot tell a season or country effect on `S0`
+from one on `R0`. Where the data cannot decide, an informed judgement is imposed instead: **R0 is
+fixed, and `S0` is a blunt sensor of susceptibility and infectivity together.** `S0_c` and `x_s` are
+read as "how easily influenza spread here / this season", never as immunity alone.
+
+**What changed in the code.** The sensing switch (`season_on`, `country_on`, `S0_fixed`, the R0-side
+priors `pr_R0c_*` and `pr_r_sd`, the `r_` / `:log_R0` names, `R0_season`, `R0_typical`) is removed
+from the C++, the base-R mirror, the recovery harness and the report writer, and the three comparison
+scripts are deleted. No parameter carries R0; the likelihood reads `d$R0_fixed`, which a new test
+checks in both implementations. The working model's numbers are unchanged: the switch's default
+already was this model. The comparison stays reproducible from commit `7b04681`.
+
+**Still open.** The pin value. At 1.5 the sensor saturates (`S0` above 0.95) in 8 of 85 cells; 1.7
+frees them all with the country ranking unchanged. 1.5 stands until the owner decides.
