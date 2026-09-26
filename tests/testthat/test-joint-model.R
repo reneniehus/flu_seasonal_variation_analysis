@@ -537,7 +537,14 @@ test_that("the default design is the documented one, and the attack rate is a se
   dref <- if (length(fit0$theta) == dd$n_par) dd else full
   skip_if_not(length(fit0$theta) == dref$n_par, "cached fit predates both layouts")
   d_short <- dref; d_short$attack_weeks <- 0L    # the old behaviour
-  expect_equal(jm_negll_cpp(fit0$theta, dref), jm_negll_cpp(fit0$theta, d_short), tolerance = 1e-12)
+  # Without spread the guarantee is exact ...
+  t_nospread <- fit0$theta; t_nospread[["log_tau"]] <- -30
+  expect_equal(jm_negll_cpp(t_nospread, dref), jm_negll_cpp(t_nospread, d_short), tolerance = 1e-12)
+  # ... and WITH spread it must not hold: copies of the wave that started earlier are still running
+  # when a country's observation window closes, so the last observed weeks depend on the epidemic past
+  # the window. Cutting the dynamics there would drop them (measured: 2.3 nats on the working fit); the
+  # full-season horizon every design uses is what keeps the likelihood right.
+  expect_gt(abs(jm_negll_cpp(fit0$theta, dref) - jm_negll_cpp(fit0$theta, d_short)), 0.01)
   # ... but it does change the attack rate, which is the point
   a_season <- jm_fitted_cpp(fit0$theta, dref)$attack
   a_window <- jm_fitted_cpp(fit0$theta, d_short)$attack

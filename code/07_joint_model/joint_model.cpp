@@ -88,9 +88,11 @@ static inline double spectral_radius3(const double M[A][A]){
 // evidence: for 5 of 86 country-seasons the modelled epidemic was still running when the window ended,
 // and the reported number moved by up to 15% (IT 2015/2016, window 38 weeks) purely because Italy's
 // series stopped early. n_weeks_dyn (>= n_weeks) is the horizon the DYNAMICS run to, so attack is a
-// season quantity for every country-season alike. Only the first n_weeks are written to inc, so the
-// likelihood is bit-identical -- verified: padding every window to 53 weeks changed the negative
-// log-likelihood by exactly 0.
+// season quantity for every country-season alike. Only the first n_weeks are written to inc, so
+// WITHOUT spread the likelihood is bit-identical -- verified: padding every window to 53 weeks changed
+// the negative log-likelihood by exactly 0. WITH spread the horizon is part of the likelihood: copies of
+// the wave that started earlier are still running when a country's window closes, and their incidence
+// past the window (read from daily[]) enters its last observed weeks.
 static inline void simulate_season(int n_weeks, int n_weeks_dyn, const double Cs[A][A], double beta,
                                    double S0, double I0, double gamma,
                                    double ve_inf, double ve_ili, double ve_spread,

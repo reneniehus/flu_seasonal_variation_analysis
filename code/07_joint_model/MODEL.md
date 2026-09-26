@@ -18,7 +18,7 @@ One page. What it assumes, why it is simpler than the compartmental pilot, and w
 > because CZ's detections feed went dark on 2025-03-26). **PL 2024/2025 is kept**: its single affected
 > week sits among neighbours with 0 detections over 114 tests, so it is almost certainly a real zero.
 >
-> The design is therefore **12 countries, 8 seasons, 85 country-seasons, 181 parameters**. All 12
+> The design is therefore **12 countries, 8 seasons, 85 country-seasons, 182 parameters**. All 12
 > countries and all 8 seasons survive. CZ also loses its ERVISS baseline slot, because 2024/2025 was
 > its only ERVISS season — the right outcome, since that slot was otherwise fitted with no off-season
 > behind it.
@@ -33,15 +33,18 @@ One page. What it assumes, why it is simpler than the compartmental pilot, and w
 
 We fit weekly influenza-positive ILI consultations from **twelve EU/EEA countries over eight seasons —
 85 country-seasons, 8 685 observed age-week cells — with a single age- and vaccination-structured SIR,
-estimated jointly in 181 parameters**. **R0 is fixed at 1.5 from the literature, not fitted.** Three age groups (0-14, 15-64, 65+) mix by each country's
+estimated jointly in 182 parameters**. **R0 is fixed at 1.5 from the literature, not fitted.** Three age groups (0-14, 15-64, 65+) mix by each country's
 contact matrix, rescaled so its dominant eigenvalue is one, which makes a season's basic reproduction
 number the realised R0 given that mixing rather than an artefact of the contact data's absolute scale.
 The elderly susceptibility re-weights that matrix and the result is **rescaled again**, so `sigma_eld`
-redistributes *who* gets infected without changing *how transmissible* the season is: `R0_s` keeps its
+redistributes *who* gets infected without changing *how transmissible* the season is: `R0` keeps its
 meaning whatever `sigma_eld` does, and `sigma_eld` is therefore identified by the age composition of
 cases rather than by the size of the wave.
 Each country-season is an independent epidemic, seeded on 1 August and integrated on a daily grid to a
-fixed 53-week horizon, with a single vaccination pulse into the 65+ group on 1 October.
+fixed 53-week horizon, with a single vaccination pulse into the 65+ group on 1 October. **A country is
+not one well-mixed population**: its cities are hit at slightly different times, so the national curve
+is the local epidemic spread over start times drawn from a normal distribution with sd `tau` days --
+one `tau` for every country and season (2026-09-26; a per-country `tau` was tested, see below).
 
 **What varies where is the model's central design**, and it is forced by the data rather than chosen
 for convenience. Observed ILI+ levels differ more than a hundredfold between countries and each country
@@ -77,7 +80,8 @@ three vaccine effects and the vaccination timing are fixed from external estimat
 allowed to vary in more than one direction at a time.
 
 **What it delivers, and what it does not.** The fit converges in about 95 s; every parameter family
-contracts against its prior by 0.69-0.95, and the season effect on susceptibility by 0.93, so nothing
+contracts against its prior by 0.69-0.95 (the spatial spread, which at two days barely acts, by 0.47),
+and the season effect on susceptibility by 0.93, so nothing
 reported is a restated assumption. The question the design must answer from shape alone -- *a bigger
 season: more susceptible, or more visible?* -- it does answer: the posterior correlation between the
 two season effects is only 0.27 (max 0.31 over seasons). Two limits are measured rather than asserted:
@@ -96,7 +100,15 @@ raw gap is carried by Croatia and 2025/2026 alone -- the cells where this model'
 ceiling of 1 at `R0 = 1.5`. Pinning `R0 = 1.7` inside this model recovers 95% of that gap with the
 country ranking preserved (rank correlation 0.99). **The data do not distinguish the two mechanisms**, so the choice is imposed
 by judgement (owner, 2026-09-26): R0 fixed, `S0` the blunt sensor. The comparison's by-product is that
-at 1.5 the sensor saturates (`S0` near 1) in 8 of 85 cells.
+at 1.5 the sensor saturates (`S0` near 1) in 8 of 85 cells. And the **spatial spread** asks whether national waves are
+fatter than one well-mixed epidemic makes them: a common spread of a week or more is rejected (fitted
+about two days, no gain; the estimate runs low, so a few days cannot be excluded), and a per-country
+spread, though it fits better in
+total, is carried by a few waves, does not follow country size, and trades against `S0` within each
+country -- so the working model keeps one shared tau, and a per-country tau would need outside
+information on the timing of regional peaks to be identifiable. Across all three quantities that make
+a wave fat, **R0 and `S0` are exactly one number; `S0` and tau are separable only through the low weeks
+at either end of a wave, and in practice only for spreads of two weeks or more.**
 
 ## What was cut relative to the compartmental pilot, and why
 
@@ -139,6 +151,7 @@ at 1.5 the sensor saturates (`S0` near 1) in 8 of 85 cells.
 | `phi_c` | between countries | 12 | negative-binomial dispersion of the weekly counts |
 | `b_c,src` | between countries and data sources present | 21 | off-season floor, per data source (CZ has only RespiCompass once its single ERVISS season is excluded) |
 | `I0_c,s` | freely between country-seasons | 85 | seed size, i.e. arrival time of that wave |
+| `tau` | nothing: one global value (per country in the tested variant, 12) | 1 | spatial spread, days: the sd of the start times of a country's local epidemics |
 
 So the two quantities the project reads are each a **two-way additive decomposition**: on the logit
 scale `logit S0_{c,s} = S0_c + x_s`, and on the log scale `log c_{c,s} = c_c + delta_s`. The country
@@ -146,9 +159,10 @@ levels carry the mean (their priors are centred on the plausible level, not on z
 effects are centred on zero and constrained to average zero, which is what makes the level and the
 effects separately identified rather than sliding against each other.
 
-Total **181**, of which 15 are shared across countries and 166 are local to one country. The
-likelihood is therefore separable given the shared block, which is what the fitting strategy exploits.
-(Without the provisional positivity-encoding exclusion it is 86 country-seasons and 183 parameters —
+Total **182**, of which 16 are shared across countries and 166 are local to one country (with `tau`
+by country: 193, of which 15 shared). The likelihood is therefore separable given the shared block,
+which is what the fitting strategy exploits.
+(Without the provisional positivity-encoding exclusion it is 86 country-seasons and 184 parameters —
 `jm_build_data(exclude_ambiguous_positivity = FALSE)`; both designs are pinned by the test suite.)
 
 ## R0 in a country: what the contact matrix, the age susceptibility and the pyramid do, and do not do
@@ -248,7 +262,7 @@ peak height; they differ by about five weeks in peak timing. The one exact tie t
 
 | claim | the number |
 |---|---|
-| the data decide, not the priors | contraction 0.95 (`S0_c`), 0.93 (`x_s`), 0.94 (`c_c`), 0.90 (`delta_s`); minimum over all families 0.69 (`sigma_eld`) |
+| the data decide, not the priors | contraction 0.95 (`S0_c`), 0.93 (`x_s`), 0.94 (`c_c`), 0.90 (`delta_s`), 0.69 (`sigma_eld`); the spatial spread 0.47, because at two days it barely acts (its profile is the better description, next section) |
 | susceptible-vs-visible is separable within a season | posterior corr(`x_s`, `delta_s`), same season: median 0.27, max 0.31 |
 | country level vs reporting level is separable | posterior corr(`logit S0_c`, `log c_c`): median magnitude 0.26 |
 | `S0` is read off the rise rate | Spearman(observed early growth rate, fitted `S0_{c,s}`) = 0.54 over 83 waves; the empirical rate is a crude 6-week slope, so this confirms the direction rather than the precision |
@@ -274,6 +288,140 @@ the seasons that spread most easily are the ones in which the smallest share of 
 positive consultation. Since the same-season posterior correlation is only 0.27, this is a pattern in
 the estimates and not a degeneracy -- but 2025/2026, which carries the largest `x_s`, rests on 7 of 12
 countries on truncated grids, so read that endpoint with its sample size.
+
+## Spatial spread, and what makes a wave fat: R0, S0 and tau (2026-09-26)
+
+**The extension.** A country is not one well-mixed population: its cities are hit at slightly
+different times. The model keeps one local epidemic per country-season and treats the country's many
+local epidemics as copies of it whose start times are spread normally, sd `tau` days, around the
+modelled one. The national incidence is the local incidence convolved with that normal kernel -- on
+the daily grid, before the weekly aggregation, each day weighted by the normal mass in its bin and the
+kernel cut at 7 sd. One parameter, `log tau ~ N(log 7 days, 0.7)`, shared by every country and
+season; `tau_by_country = TRUE` gives each country its own instead. Figure 03 has a panel for it.
+
+Three properties are exact, and the test suite holds the kernel to them: the **total** is unchanged
+(so is the attack rate), the **mean timing** is unchanged, and every **exponential rate** is unchanged
+-- the rise and the decline -- because a convolved exponential is the same exponential times a
+constant. Only the peak changes: the curve's variance grows by exactly `tau^2 + 1/12` day^2. So tau
+cannot make a wave faster, bigger or earlier; it can only round and widen it. One side effect: in the
+exponential phase the spread curve runs `r tau^2 / 2` days ahead of the local one (the earliest cities
+lead), which the seed absorbs.
+
+**Checked, not assumed.** Below 0.05 days the untouched original code path runs. Against the
+pre-extension engine compiled from git, the fitted means are **bit-identical in all 85
+country-seasons** and the working fit's log-likelihood is identical to 0.000 nats; a refit from
+scratch with tau pinned at zero lands on the old optimum (-50798.60 against -50798.59). The C++ and the
+base-R reference compute the spread two different ways -- cumulative incidence at week boundaries with
+erfc weights, and direct daily convolution with pnorm weights -- and agree to 1e-14 relative from
+tau = 1e-13 to 119 days.
+
+**One tau for every country: a few days at most.** Fitted tau 2.1 days from two starts; against no
+spread it gains -0.08 nats (wave-bootstrap interval [-1.5, +1.2]). The profile, tau held and the other
+181 parameters refitted (`run_tau_analysis.R`):
+
+| tau held (days) | 0 | 1 | 2.1 | 4 | 7 | 10 | 13.9 | 20.5 |
+|---|---|---|---|---|---|---|---|---|
+| log-likelihood vs the best | -0.02 | 0 | -0.10 | -0.73 | -6.4 | -30 | -107 | -332 |
+
+A common spread of a week or more is rejected. The estimate itself runs low (recovery, below), so the
+fitted 2.1 days means "a few days at most", not "none". Not the S0 ceiling: with R0 pinned at 1.7,
+where no `S0` exceeds 0.90, tau again settles at 2.3 days (+0.32 nats over no spread).
+
+**One tau per country: real, but not geography.** Five starts reach the same optimum to 0.00 nats (a
+sixth, warm-started from the shared fit, stalled 11 nats worse, which is why the runner uses five).
+It fits **+52.7 nats better** than one shared tau with 11 more parameters (+35 after the
+autocorrelation deflation). With the wave as the unit the evidence is weaker than the total suggests:
+49 of 85 waves favour it (sign test p = 0.19, Wilcoxon p = 0.17), and the cluster bootstrap on the
+total excludes zero only when whole countries are resampled ([+5, +109]; waves [-3, +124], seasons
+[-4, +113]). Each country's own profile -- its tau held, its block refitted, the shared block fixed:
+
+| country | nats lost if its tau is forced to 0 | best tau (days) | its `S0` at tau 0 -> at the best tau |
+|---|---|---|---|
+| PL | 20.2 | ~30 | 0.82 -> 0.88 |
+| EE | 14.7 | ~30, barely bounded above | 0.80 -> 0.85 |
+| NO | 8.8 | 21 | 0.85 -> 0.88 |
+| FR | 6.0 | 14 | 0.90 -> 0.92 |
+| DK | 5.8 | 14 | 0.88 -> 0.89 |
+| IT | 3.1 | 14 | 0.88 -> 0.90 |
+| CZ, BE, ES, HR, IE, NL | ~0 | 0-2 | unchanged |
+
+Six countries want spread and six do not, and **country size does not predict which** (rank
+correlation of the fitted tau with population 0.03): Spain and the Netherlands want none, Estonia the
+most. Estonia's weekly series are the noisiest in the panel (dispersion 0.25) and a 36-day spread lays
+a low, broad mean through the scatter; Poland is the plausible case -- without spread the model
+overshoots its peaks up to twofold. So a per-country tau is a **blunt sensor of how fat a country's
+waves are** -- spatial asynchrony, but equally subtype mixing, aggregation over a sentinel network
+and plain noise -- not a map of its cities.
+
+**What makes a wave fat, and what the data can tell apart.** Three quantities set a wave's shape: R0
+and `S0` through the local epidemic, tau through its spread; reporting sets its height and the seed
+its timing.
+
+1. **R0 and `S0` are exactly one number.** Every term of the age x vaccination system and of its daily
+   Euler step is homogeneous in the compartments, so incidence(t; R0, S0, I0) = S0 x incidence(t;
+   R0 S0 at full susceptibility, I0/S0). Hence (R0, S0, I0, c) -> (k R0, S0/k, I0/k, k c) leaves every
+   expected count unchanged -- verified to 7e-14 in all 85 waves (1e-9 with spread). No amount of data
+   separates them, which is why fixing R0 had to be a judgement. The only asymmetry is `S0 <= 1`: the
+   pin's value reaches the data through the ceiling alone (8 of 85 cells above 0.95 at 1.5), plus, weakly, the
+   logit-additive form of the season and country effects, which a rescaling of `S0` does not preserve.
+2. **`S0` and tau are separable in principle, through the tails.** `S0` moves the rise rate, the decline
+   rate and the width together; tau moves the width only (the exact invariances above). Figure 03
+   (middle of the lower row) shows it: at the same peak and width, a less susceptible wave rises AND
+   decays more slowly, and by week 45 its tail is eight times higher. Two practical limits. The tails
+   are the low-count weeks at either end, where the off-season baseline and the negative-binomial noise
+   sit. And a weekly series' measurable rise lies partly in the approach to the peak, which spread does
+   slow: in figure 18b a spread of up to a week stays within half a week of the no-spread line -- a
+   small `S0` change mimics it -- and only from two weeks on does the wave leave the line. Tau is also
+   one-sided: it can widen a wave, never sharpen it.
+3. **What the data do with one shared tau.** The Hessian finds no correlation above 0.18 with any
+   other parameter (Croatia's `S0` and seeds) and a contraction of 0.47 -- but at two days tau barely
+   acts, so the profile above is the better description. Recovery on simulated data finds the ridge.
+   A true shared spread of 2.1 days comes back as 2.4; of 7 days as 2.9, 3.0 and 3.0 in three
+   simulations; of 14 days as 9.3, 9.5 and 10.5 -- each time with `S0` pushed down (by 0.08-0.11 logit
+   at a week, 0.16-0.20 at two), while the country ranking of `S0` survives (0.94-0.99) because the
+   shift is common to every country. **It is the likelihood's own ridge, not the priors**: on one of
+   the 7-day data sets, holding tau at the true 7 days fits 0.64 nats WORSE than holding it at 3, and a
+   threefold weaker `S0` prior leaves the estimate at 2.95 days. Up to about a week, more spread with
+   higher `S0` or less of both fit almost equally well, and the maximum sits low, as a variance
+   estimated from noisy data does. Read back on the real data: the profile falls 6.4 nats from the
+   best tau to a week, ten times more than on data where a week is the truth, so a common week of
+   spread is rejected -- but the fitted 2.1 days is compatible with a true common spread of a few days.
+4. **What the data do with one tau per country.** The ridge becomes per country. Where a country uses
+   spread plausibly, its tau and its `S0` are strongly correlated in the posterior -- 0.85 in France,
+   0.90 in Norway, 0.70 in Italy, 0.72 in Poland, with that country's seeds at -0.7 to -0.9: more
+   spread, higher `S0`, earlier seeds. Estonia's tau is pinned tightly (posterior sd 0.03 on the log
+   scale) but by its noise, not by the ridge (correlation with its `S0` 0.12); the six countries near
+   zero are held by the prior (contraction 0.05-0.40). In recovery from a world where big countries
+   spread 14 days and small ones 3, the estimates separate in the right direction (medians 9.6 against
+   4.6 days, rank correlation 0.77) but shrink towards each other, and the **country ranking of `S0`
+   comes back at 0.69 instead of 0.94-0.99**, the season effects at 0.68 instead of 0.82-0.93. The
+   wave-level test CAN see a real country difference: on those simulated data 57 of 85 waves favour
+   the per-country model (sign test p = 0.002, Wilcoxon p = 0.0001) and every bootstrap interval
+   excludes zero, for a modest +12 nats. On the real data the total is four times larger but only 49
+   waves agree -- a large gain carried by a few waves, the signature of absorbing wave-specific misfit
+   rather than of a country-level spread.
+5. **What moves when tau is by country, and what does not.** On the real data the country `S0` ranking
+   moves (rank correlation 0.80 against no spread; Estonia from lowest to fourth, the Netherlands from
+   fourth to lowest), so does the 2025/2026 season effect (0.55 -> 1.01 logit) and the number of `S0`
+   at the ceiling (8 -> 10). The pattern of the season effects on `S0` does not (0.98), nor do season
+   visibility and reporting levels (0.99). And the pin reaches tau nowhere: with R0 at 1.7 every
+   country's tau moves by at most a day -- Croatia, at the `S0` ceiling under 1.5, stays at 2.5 days
+   although its local wave may now be sharper -- while every `S0` scales by 1.5/1.7 = 0.88 exactly as
+   point 1 requires (Denmark 0.887 -> 0.782), Croatia excepted because the ceiling released it
+   (0.972 -> 0.867).
+
+**Decision.** The working model keeps **one shared tau** (`tau_by_country = FALSE`, the default):
+the data put it at about two days, so every conclusion of the model without spread stands, and the
+parameter now reports a result -- no common spread of a week or more. **Tau by country is not
+adopted.** It fits better in total but not wave by wave, where a real country difference would show;
+its values do not follow country size and in Estonia fit noise; and within each country it trades
+against `S0` -- in the simulation where it is the true model, the country ranking of `S0` came back at
+0.69, against 0.94-0.99 whenever tau is shared -- which costs the quantity the project reads. It stays
+one setting away as a tested hypothesis (`run_tau_analysis.R`, figure 18). **If spatial spread per
+country is to be modelled, it needs outside information to pin it**: the observed dispersion of
+regional peak times within each country, from sub-national surveillance or published estimates, as a
+prior on each tau. That would take it off the ridge instead of letting it float there, and it is what
+more of the same national data cannot do.
 
 ## Where does the variation live: in `S0` or in `R0`? (model comparison, 2026-09-25)
 

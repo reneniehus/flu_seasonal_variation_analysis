@@ -15,9 +15,9 @@ models_in = readRDS("output/models_in.rds"); load("output/demography_respicast.R
 # every country the panel can age-structure; jm_build_data drops those with too few seasons
 # A DELIBERATE SELECTION, not what the panel can support. At the design's own inclusion rule three
 # further countries would qualify -- Iceland (7 age-complete seasons), Malta (6), Austria (5) -- and are
-# not offered to the model. That is a scope choice worth stating, because sharing R0_s across the
-# countries IN the design is exactly what identifies each country's S0 (MODEL.md), so membership is
-# substantive rather than incidental. The comment here used to claim the opposite.
+# not offered to the model. That is a scope choice worth stating, because the season effects are
+# shared across the countries IN the design, which is what separates each season from each country
+# (MODEL.md), so membership is substantive rather than incidental.
 candidates = c("DK", "EE", "ES", "FR", "NO", "BE", "CZ", "IE", "IT", "PL", "HR", "NL")
 d = jm_build_data(candidates, models_in, demo)   # min_seasons defaults to 5: keeps Spain in (owner, 2026-09-12)
 

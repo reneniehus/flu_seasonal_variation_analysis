@@ -28,7 +28,7 @@ country-seasons of 12 countries** (AT, BG, CZ, HU, IS, IT, LT, LV, MT, PL, RO, S
 
 **What we currently assume.** That an absent row is *not* reliably a zero, so a country-season is
 excluded when it contains weeks that cannot plausibly have been zero. In the fitted design that
-excludes **CZ 2024/2025** and keeps everything else, giving 12 countries / 85 country-seasons / 181
+excludes **CZ 2024/2025** and keeps everything else, giving 12 countries / 85 country-seasons / 182
 parameters.
 
 **The evidence for that reading** (analysed 2026-09-16; `erviss_encoding_ambiguous()` in

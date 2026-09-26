@@ -1,9 +1,9 @@
 # joint_model.R -- data assembly, parameter packing, and the fitting strategy for the joint model.
 # The model itself is MODEL.md; the log-posterior is joint_model.cpp; this file is the driver.
 #
-# Fitting strategy, and why. The likelihood is SEPARABLE: only R0_s, the season deviations and the one
-# elderly susceptibility appear in more than one country's terms. Everything else is local to a single
-# country. A flat finite-difference gradient over ~184 parameters costs 185 full-likelihood
+# Fitting strategy, and why. The likelihood is SEPARABLE: only the two season effects, the one elderly
+# susceptibility and the shared spatial spread appear in more than one country's terms. Everything
+# else is local to a single country. A flat finite-difference gradient over ~182 parameters costs 183 full-likelihood
 # evaluations; a block sweep costs about 33, because a country's own likelihood is a twelfth of the
 # joint one. So we alternate: every country's local block optimised in parallel with the shared block
 # held fixed, then the shared block with the locals held fixed, repeated, then one joint polish.
@@ -241,8 +241,10 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
     # The DYNAMICS horizon, distinct from the observation windows. Each country-season is observed for
     # however long its surveillance series runs (33 to 53 weeks here), but the attack rate has to mean
     # the same thing in every cell to be comparable across them and against cohort evidence, so the
-    # epidemic is integrated to a full season everywhere. Only the observed weeks enter the
-    # likelihood, so this changes no fitted value -- see simulate_season in the C++.
+    # epidemic is integrated to a full season everywhere. Without spread only the observed weeks
+    # enter the likelihood, so the horizon changes no fitted value; with spread it must run past the
+    # window, because earlier-started copies of the wave are still running when a series stops --
+    # see simulate_season and spread_weekly in the C++.
     attack_weeks = max(53L, max(as.integer(n_weeks))),
     # what was dropped for the ambiguous positivity encoding, so the exclusion is visible in the
     # fitted object rather than only in a build log that scrolls away

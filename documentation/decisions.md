@@ -986,3 +986,46 @@ already was this model. The comparison stays reproducible from commit `7b04681`.
 
 **Still open.** The pin value. At 1.5 the sensor saturates (`S0` above 0.95) in 8 of 85 cells; 1.7
 frees them all with the country ranking unchanged. 1.5 stands until the owner decides.
+
+## 2026-09-26 -- spatial spread tau: implemented, a shared tau adopted, a per-country tau tested and not adopted
+
+**Owner request.** Burden waves spread through a country at slightly different times because of its
+city structure: copy the wave several times with normal weights, ideally with one parameter for how
+fat the wave gets. Implement it, check that tau = 0 reproduces the current fit, then test tau by
+country, then discuss identifiability again, since tau, R0 and S0 all govern how fat a wave is.
+
+**What was built.** The national incidence is the local epidemic convolved, on the daily grid and
+before the weekly aggregation, with a normal kernel of sd tau days. `log tau ~ N(log 7, 0.7)`; one tau
+shared (default) or one per country (`tau_by_country = TRUE`). Exactly preserved: the total, the mean
+timing and every exponential rate (rise and decline); the variance grows by tau^2 + 1/12 day^2. Below
+0.05 days the original code path runs: against the pre-extension engine the fitted means are
+bit-identical in all 85 country-seasons and the log-likelihood identical to 0.000 nats, and a refit
+with tau pinned at 0 lands on the old optimum. The C++ and the base-R reference compute the spread two
+different ways and agree to 1e-14. `run_tau_analysis.R` reproduces every number below; figure 18.
+
+**Results.**
+- A shared tau goes to 2.1 days and gains nothing (-0.08 nats); the profile rejects a week or more
+  (-6.4 nats at 7, -107 at 14). It is not the S0 ceiling: at R0 = 1.7 it again settles at 2.3 days.
+  The estimate runs LOW: a true week of spread comes back as about 3 days in three of three
+  simulations, two weeks as about 10, with S0 pushed down each time. That is the likelihood's own
+  ridge, not the priors (on a 7-day data set the likelihood prefers 3 days by 0.64 nats; a threefold
+  weaker S0 prior changes nothing). So "2.1 days" reads as "a few days at most", not "none".
+- Tau by country: five starts, one optimum; +52.7 nats over the shared tau with 11 more parameters,
+  but 49 of 85 waves agree (sign p 0.19, Wilcoxon 0.17). On simulated data with a real big-versus-small
+  difference the same test finds it easily (57 of 85, p = 0.002) for only +12 nats: the real gain is
+  large but lumpy, the signature of absorbing wave-specific misfit. Six countries want spread (PL, EE,
+  NO, FR, DK, IT), six do not; size does not predict which (rank correlation 0.03); Estonia's 36 days
+  fits the noisiest series in the panel.
+- Within a country tau and S0 lie on a ridge (posterior correlation 0.70-0.90 where tau is used); with
+  tau by country the S0 country ranking moves (0.80 against no spread) and, in recovery, is recovered
+  at 0.69 instead of 0.94-0.99. Season effects keep their pattern (0.98; the 2025/26 magnitude does not).
+- R0 and S0 are exactly exchangeable -- (k R0, S0/k, I0/k, k c) reproduces every expected count to
+  7e-14 -- so the R0 pin reaches the data only through S0 <= 1; at R0 = 1.7 every S0 scales by 0.88 and
+  no tau moves.
+
+**Decision (made here, reversible by one setting).** The working model keeps one shared tau: it is
+what the owner asked for, it costs nothing in the conclusions, and it now reports a finding (no common
+spread of a week or more). Tau by country is recorded as tested and not adopted: its gain is not
+consistent across waves, its values are not geography, and it costs S0's country ranking its
+identifiability. **For the owner:** a per-country spread becomes identifiable with outside information
+on how dispersed the regional peak times are within each country, used as a prior on each tau.
