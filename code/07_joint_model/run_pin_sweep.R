@@ -7,8 +7,9 @@
 #      preserve (fit, and whether rankings and season patterns move);
 #   3. the ABSOLUTE scale: at a fixed R0 x S0 the infections scale by 1/k and the reporting fraction by k,
 #      so the pin sets the attack rate -- the one place where outside evidence (serology) can inform it.
-# The S0 prior centre moves with the pin (0.75 x 1.5 / R0), so the prior sits on the same R0 x S0 at
-# every pin and cannot decide between them. About 12 minutes on four cores.
+# The S0 prior centre moves with the pin by construction (it is set on R0 x S0, see jm_settings), so the
+# prior sits on the same R0 x S0 at every pin and cannot decide between them. About 12 minutes on four
+# cores.
 setwd(here::here())
 suppressMessages(source("code/01_main_supporting/setup.R"))
 source("code/01_main_supporting/stitch_iliplus.R"); source("code/01_main_supporting/sir_core.R")
@@ -24,7 +25,7 @@ pins = c(1.5, 1.7, 2.0, 2.5, 3.0)
 fits = lapply(pins, function(r0){
   f = file.path(out, sprintf("fit_R0_%.1f.rds", r0))
   if (file.exists(f)) return(readRDS(f))
-  s = modifyList(jm_settings(), list(R0_fixed = r0, pr_S0_mean = qlogis(0.75 * 1.5 / r0)))
+  s = modifyList(jm_settings(), list(R0_fixed = r0))
   d = jm_build_data(cands, models_in, demo, set = s, verbose = FALSE)
   fit = jm_fit(d, theta0 = jm_theta0(d, s), cores = cores, verbose = FALSE)
   saveRDS(fit, f); fit

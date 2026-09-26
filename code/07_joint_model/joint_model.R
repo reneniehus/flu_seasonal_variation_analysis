@@ -23,12 +23,15 @@ jm_settings = function(){
     gamma_per_day = 0.2777778,     # 3.6-day mean infectious period, from the project notes
     ve_inf = 0.25, ve_ili = 0.20, ve_spread = 0.20,
     rate_per = 1e5, vax_day = 62L, # the 65+ vaccination pulse, 1 October
-    # R0 IS FIXED, NOT FITTED (owner, 2026-09-25/26). Transmissibility and susceptibility enter the
-    # rise rate as a product, so one wave identifies only their product, and a model comparison
-    # (MODEL.md) showed the data cannot say which of the two varies between seasons or countries.
-    # Which one senses is therefore an informed judgement, not a data result: R0 is pinned from the
-    # literature and S0 is a deliberately BLUNT sensor of susceptibility and infectivity together.
-    R0_fixed = 1.5,
+    # R0 IS FIXED, NOT FITTED (owner, 2026-09-25/26). R0 and S0 are exactly one number to the data:
+    # (k R0, S0/k, I0/k, k c) reproduces every expected count (MODEL.md), so which of the two senses is
+    # a judgement, not a data result, and S0 is a deliberately BLUNT sensor of the wave's shape --
+    # susceptibility, infectivity and the overlay of a country's local waves. The pin's VALUE reaches
+    # the data only through the ceiling S0 <= 1 and otherwise sets the absolute scale (attack rates as
+    # 1/R0, reporting fractions as R0). 2.0 (owner, 2026-09-26): 1.5 pressed the ceiling in 8 of 85
+    # cells, 1.7 cleared it by little, 2.0 leaves room at no cost to any relative result, and R0 x S0
+    # stays at the literature's seasonal reproduction number either way (MODEL.md, "The R0 pin").
+    R0_fixed = 2.0,
     # SPATIAL SPREAD, FIXED (owner, 2026-09-26). A country's cities are hit at slightly different
     # times, which fattens the national wave. Fitted, a spread parameter lay on a ridge with S0 and, per
     # country, cost S0's country ranking its identifiability (MODEL.md), so it is fixed like R0: at 0 by
@@ -37,12 +40,15 @@ jm_settings = function(){
     # information on regional peak timing.
     tau_fixed = 0,
     # priors, all on the unconstrained scale the fit works in
-    pr_x_sd = 0.5,                            # season effect on logit S0, centred on zero. At S0 ~ 0.8
-                                              # one sd is ~ +/-0.09 on S0 itself; wide enough for the
-                                              # data to dominate (contraction is reported), tight
-                                              # enough to close the S0 -> 1 escape
-    pr_S0_mean = qlogis(0.75), pr_S0_sd = 1,  # the COUNTRY level of logit S0 (the mean of the two-way
-                                              # decomposition lives here, not in a separate slot)
+    pr_x_sd = 0.5,                            # season effect on logit S0, centred on zero. At S0 ~ 0.64
+                                              # one sd is ~ +/-0.11 on S0 itself; wide enough for the
+                                              # data to dominate (contraction is reported)
+    # The COUNTRY level of logit S0 (the mean of the two-way decomposition lives here, not in a
+    # separate slot). Its centre is set on R0 x S0, the only thing the data see: pr_Reff0_mean is the
+    # prior centre for R0 x S0 at the average season, and jm_build_data turns it into
+    # pr_S0_mean = qlogis(pr_Reff0_mean / R0_fixed). So a change of pin moves the prior with it and
+    # cannot leak into the fit through it. 1.125 is what 0.75 was at the former pin of 1.5.
+    pr_Reff0_mean = 1.125, pr_S0_sd = 1,
     pr_sigma_mean = 1, pr_sigma_sd = 0.5,     # log2 sigma_eld ~ N(1, .5): centre 2x, 95% band 1.0-4.0x
     pr_delta_sd = 0.5,                        # season observation deviation, constrained to average 0
     pr_off_sd = 1,                            # log2 age reporting offsets
@@ -71,7 +77,7 @@ jm_load_cpp = function(dir = "output/joint_model/cpp_cache"){
 # Counts are ROUNDED here: the panel holds rates, the count scale is a device (MODEL.md), and the
 # negative binomial wants integers.
 # min_seasons = 5L is the OWNER'S DECISION of 2026-09-12 ("5 keeps Spain in"), which is what gives the
-# documented design of 12 countries / 86 country-seasons / 184 parameters. It was left at 6 here while
+# documented design of 12 countries (85 country-seasons, 181 parameters, today). It was left at 6 here while
 # only run_joint_model.R passed the override, so any other caller reproducing "the model" as the
 # documents describe it silently got an 11-country / 81 / 173 design instead, announced by one buried
 # line of verbose output. The default now IS the decision, and a test pins the resulting design.
@@ -181,6 +187,8 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
   n_shared = 2L * S - 1L                                 # S-1 free x, S-1 free delta, 1 log2 sigma
   if (!(is.numeric(set$tau_fixed) && length(set$tau_fixed) == 1L && set$tau_fixed >= 0 && set$tau_fixed <= 120))
     stop("tau_fixed must be one number of days between 0 and 120")
+  if (!(set$pr_Reff0_mean > 1 && set$pr_Reff0_mean < set$R0_fixed))
+    stop("pr_Reff0_mean (the prior centre for R0 x S0) must lie between 1 and the pinned R0")
   off_country = as.integer(cumsum(c(n_shared, head(n_local, -1))))   # 0-based starts
   n_par = as.integer(n_shared + sum(n_local))
 
@@ -248,8 +256,10 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
     attack_weeks = max(53L, max(as.integer(n_weeks))),
     # what was dropped for the ambiguous positivity encoding, so the exclusion is visible in the
     # fitted object rather than only in a build log that scrolls away
-    excluded_ambiguous = excluded
-  ), set[grep("^pr_", names(set))])
+    excluded_ambiguous = excluded,
+    # the S0 prior centre, placed on R0 x S0 (see jm_settings): the C++ reads pr_S0_mean
+    pr_S0_mean = qlogis(set$pr_Reff0_mean / set$R0_fixed)
+  ), set[setdiff(grep("^pr_", names(set), value = TRUE), "pr_S0_mean")])   # never a stale copy of it
   if (verbose){
     cat(sprintf("%d countries, %d seasons, %d country-seasons, %d parameters (%d shared, %d local)\n",
                 C, S, length(y), n_par, n_shared, sum(n_local)))
@@ -290,7 +300,10 @@ jm_theta0 = function(d, set = jm_settings()){
   th[seq_len(S - 1)] = 0                                # no season effect on susceptibility
   th[S - 1L + seq_len(S - 1)] = 0                       # no season effect on visibility
   th[2L * S - 1L] = set$pr_sigma_mean                   # elderly susceptibility at 2x
-  r0 = set$gamma_per_day * (set$R0_fixed * 0.8 - 1)     # a plausible early growth rate, per day
+  # start every country at R0 x S0 = 1.2, whatever the pin (it was S0 = 0.8 at the former pin of 1.5,
+  # which at 2.0 would start every wave implausibly fast), and time the seeds with that growth rate
+  S0_start = 1.2 / d$R0_fixed
+  r0 = set$gamma_per_day * (d$R0_fixed * S0_start - 1)  # a plausible early growth rate, per day
   for (ic in seq_len(d$n_country)){
     base = d$off_country[ic]
     ics = d$cs_of_country[[ic]] + 1L
@@ -300,7 +313,7 @@ jm_theta0 = function(d, set = jm_settings()){
     # is NA, which would put NA into log_b and leave that whole block silently un-optimised
     floor_r = max(c(as.numeric(quantile(rate_all[rate_all > 0], 0.10, na.rm = TRUE)), 1e-3), na.rm = TRUE)
     c0 = min(max(peak / d$rate_per / 0.02, 1e-4), 1)
-    th[base + 1] = qlogis(0.80)
+    th[base + 1] = qlogis(S0_start)
     th[base + 2] = log(c0)
     th[base + 3] = 0; th[base + 4] = 0
     th[base + 5] = set$pr_phi_mean

@@ -173,7 +173,7 @@ jm_truth_from_prior = function(d, set = jm_settings(), anchor = NULL){
   th[2L * S - 1L] = rnorm(1, set$pr_sigma_mean, set$pr_sigma_sd)
   for (ic in seq_len(d$n_country)){
     b = d$off_country[ic]
-    th[b + 1] = rnorm(1, set$pr_S0_mean, set$pr_S0_sd)
+    th[b + 1] = rnorm(1, d$pr_S0_mean, d$pr_S0_sd)          # the prior the fit uses, set on R0 x S0
     th[b + 2] = th[b + 2] + rnorm(1, 0, 0.3)                          # around the data-driven level
     th[b + 3] = rnorm(1, 0, set$pr_off_sd); th[b + 4] = rnorm(1, 0, set$pr_off_sd)
     th[b + 5] = rnorm(1, set$pr_phi_mean, 0.4)

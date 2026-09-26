@@ -1068,3 +1068,46 @@ already 0.90: a season more extreme than 2025/26 would press the ceiling again, 
 per season, but the homogeneous SIR's final size is the least trustworthy number a shape sensor
 produces, so the pin should not be tuned to it. With S0 read as a sensor of the wave's shape, any pin
 from 1.7 up is a choice of units for S0; 2.0 is the choice that keeps the sensor off its stop.
+
+## 2026-09-26 (late) -- R0 = 2.0 applied, checked, and the documentation rebuilt for reflection
+
+**Owner decision: R0 = 2.0.** Applied as recommended (previous entry). Three things changed with it:
+- **The S0 prior is placed on R0 x S0.** `pr_Reff0_mean = 1.125` replaces `pr_S0_mean`, and
+  `jm_build_data` sets `pr_S0_mean = qlogis(1.125 / R0)` (0.5625 at 2.0). Only the product reaches the
+  data, so the prior belongs on it; a future change of pin now moves the prior with it instead of
+  silently leaving it at the old product.
+- **The starting values follow the pin.** `jm_theta0` started every country at S0 = 0.8, which at R0 =
+  2.0 is a wave growing implausibly fast; it now starts at R0 x S0 = 1.2 whatever the pin. Checked: the
+  working fit from the new start and the sweep's fit from the old one reach the same optimum to 0.000
+  nats.
+- **What the pin sets is said where it is shown.** Figures 12 and 14 claimed an absolute reporting
+  fraction and an attack rate "free of reporting" to compare with cohort studies; both levels are set
+  by the pin (as R0 and as 1/R0), so their captions now say so and compute the alternative levels from
+  the fit. Four captions still described the per-season R0 of an earlier model; corrected.
+
+**The check.** Refit: converged, no flat country, penalised Hessian positive definite, no direction the
+data cannot see; contraction 0.70-0.98 (S0 better determined than at 1.5: 0.98 and 0.97 against 0.95
+and 0.93, because the logit scale is no longer compressed near 1). Full test suite: one stale test
+found -- it wrote log(R0) into the slots that became the season effects on S0 at the fixed-R0 change,
+so it tested the wrong thing and passed by luck until the new starting values exposed it; rewritten to
+raise the pinned R0 itself. Every other positional write in the tests was audited against the layout.
+Recovery, prior stress test and figure-by-figure review: see MODEL.md sections 5-6.
+
+**A pattern found in the check, for the owner.** The country ranking of S0 follows data quality: its
+rank correlation with each country's dispersion is 0.75, and the three noisiest series (PL, NL, EE)
+carry three of the four lowest S0. The recovery study rules out the estimator as its cause: on data
+simulated from the fit, the noisy countries' S0 comes back slightly HIGH (less than 0.01 logit), not
+low. So the association is in the data or in misfit the simulation lacks -- open, and a reason to read
+the bottom of the country ranking with care.
+
+**Recovery of this model** (first run since R0 was fixed; MODEL.md section 6, figure 16): local, 8
+replicates -- country S0 ranking 0.97, season effects 0.98 (Pearson), visibility 1.00, coverage 97%;
+prior-space, 4 -- rankings 1.00, coverage 83-96% for most families (elderly susceptibility 1 of 4);
+driver, 6 -- a known effect on both season effects comes back unbiased (0.240 for 0.25, 0.346 for
+0.35); misspecification -- a 10% between-country R0 spread takes the country S0 ranking to 0.07 while
+the season results hold, a spurious second wave changes nothing. One small bias: Croatia's S0 comes
+back 0.044 logit low, the seed prior pulling on its very small seeds.
+
+**The documentation.** MODEL.md is rebuilt for reading: sections 1-7 are the current model and what
+it learned, each number from the R0 = 2.0 fit, section 8 a guide to the figures, and the
+investigations that shaped the design follow as dated appendices A-K.

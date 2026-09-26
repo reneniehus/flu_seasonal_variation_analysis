@@ -229,19 +229,20 @@ test_that("the data-implied dispersion is one definition used everywhere", {
 
 test_that("the C++ and R implementations agree where the pool cap BINDS, not just at sane parameters", {
   # The cap (flow limited to what S_u holds) only engages when lambda > 1 in a day, i.e. around
-  # R0 > 6. The identity test at fitted values therefore passed for a while with the cap present in
-  # C++ and absent in R. This exercises the regime where they could differ.
-  for (R0 in c(1.5, 6.5, 10, 40)){
-    t2 <- th; t2[seq_len(d$n_season)] <- log(R0)
-    expect_equal(jm_negll_cpp(t2, d), jm_negll_R(t2, d), tolerance = 1e-9,
+  # R0 x S0 > 6. The identity test at fitted values therefore passed for a while with the cap present
+  # in C++ and absent in R. This exercises the regime where they could differ -- by raising the PINNED
+  # R0 itself. (Until 2026-09-26 this test wrote log(R0) into the first parameter slots, which since
+  # the fixed-R0 change are the season effects on S0: it tested something else and passed by luck.)
+  with_R0 <- function(v){ d2 <- d; d2$R0_fixed <- v; d2 }
+  for (R0 in c(2, 6.5, 10, 40))
+    expect_equal(jm_negll_cpp(th, with_R0(R0)), jm_negll_R(th, with_R0(R0)), tolerance = 1e-9,
                  info = paste("R0 =", R0))
-  }
-  # and the invariant the cap restores: nobody can be infected more than once
-  t3 <- th; t3[seq_len(d$n_season)] <- log(40)
-  f <- jm_fitted_cpp(t3, d)
+  # and the invariant the cap restores: nobody is infected more than once, i.e. no age group's attack
+  # rate exceeds that country-season's own susceptible fraction
+  d40 <- with_R0(40); f <- jm_fitted_cpp(th, d40); p <- jm_unpack(th, d40)
   for (i in seq_len(d$n_cs)){
-    S0 <- plogis(t3[jm_blocks(d)$local[[d$cs_country[i] + 1L]][1]])
-    expect_lte(max(f$attack[i, ]), S0 + 1e-9)
+    S0_cs <- p$country[[d$cs_country[i] + 1L]]$S0_season[[d$seasons[d$cs_season[i] + 1L]]]
+    expect_lte(max(f$attack[i, ]), S0_cs + 1e-9)
   }
 })
 
@@ -516,7 +517,7 @@ test_that("the default design is the documented one, and the attack rate is a se
   # min_seasons = 5 decision gives 12 / 86 / 183; with it (the default since 2026-09-16, provisional
   # pending surveillance confirmation) CZ 2024/2025 is dropped and CZ loses the ERVISS baseline slot
   # that had no off-season behind it, giving 12 / 85 / 181. (R0 fixed since 2026-09-25: the
-  # shared block is 2S-1, the S slots of R0_s gone; the spatial spread is fixed, not a slot.)
+  # shared block is 2S-1, the S slots of the old per-season R0 gone; the spread is fixed, not a slot.)
   full <- withr::with_dir(here::here(),
             jm_build_data(cand, models_in, demo, verbose = FALSE,
                           exclude_ambiguous_positivity = FALSE))
@@ -734,7 +735,7 @@ test_that("no fitted slot is left without a prior", {
 
 test_that("the elderly susceptibility redistributes infection without changing transmissibility", {
   # sigma re-weights the contact matrix and the result is rescaled to spectral radius 1 again. That is
-  # what lets R0_s mean the same thing whatever sigma_eld is -- and it means sigma_eld is identified by
+  # what lets R0 mean the same thing whatever sigma_eld is -- and it means sigma_eld is identified by
   # the AGE COMPOSITION of cases, not by the size of the wave. Documented in MODEL.md; asserted here.
   S <- d$n_season
   rho_of <- function(theta){

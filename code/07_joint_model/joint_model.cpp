@@ -56,8 +56,8 @@ static const int A = 3;                       // young, medium, elderly -- fixed
 static const double LOG_2PI = 1.8378770664093453;
 
 // ---- |-dominant eigenvalue of a 3x3 positive matrix by power iteration ----
-// The contact matrix is rescaled to spectral radius 1 so that the realised R0 equals R0_s exactly
-// (MODEL.md). Scaling its rows by the age susceptibilities changes that radius, and sigma_eld is
+// The contact matrix is rescaled to spectral radius 1 so that the realised R0 equals the pinned R0
+// exactly (MODEL.md). Scaling its rows by the age susceptibilities changes that radius, and sigma_eld is
 // fitted, so the radius has to be recomputed every evaluation. Power iteration on 3x3 costs nothing
 // and avoids a dependency on an eigen solver.
 static inline double spectral_radius3(const double M[A][A]){

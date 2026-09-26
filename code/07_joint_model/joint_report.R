@@ -149,7 +149,7 @@ plot_jm_data_features = function(fit){
     labs(title = "2. Seasons rise and fall TOGETHER across Europe",
          subtitle = paste("Each country's peak divided by its own median peak, so the country level is removed. Thin",
                           "lines are countries, thick the median. They move in step -- a big season is big almost",
-                          "everywhere -- which is what licenses ONE transmissibility and ONE visibility per season", sep = "\n"),
+                          "everywhere -- which is what licenses ONE effect on S0 and ONE on visibility per season", sep = "\n"),
          x = NULL, y = "peak relative to that country's median")
 
   # (c) a third of the observations are exactly zero -> negative binomial, not Gaussian
@@ -196,11 +196,12 @@ plot_jm_data_features = function(fit){
 # jm_fitted_cpp at a perturbed parameter vector -- the real C++ model, not a redrawing of it -- so
 # the figure cannot drift from the thing it describes.
 #
-# The last panel is the point of the whole design: two pairs of curves that lie on top of each other.
-# Transmissibility and susceptibility enter the rise rate as a product, and reporting level and
-# season visibility enter the observation as a product, so within one country-season each pair is
-# indistinguishable. Sharing R0 across countries and constraining the visibilities to average one is
-# what breaks the two ties.
+# The last row is the point of the whole design: what one wave can and cannot tell apart. A bigger
+# season from more susceptibility or from more visibility (different shapes, so separable); a fatter
+# wave from lower susceptibility or from spatial spread (separable only through the low tails, so the
+# spread is fixed); and reporting level x season visibility (identical curves: only the average-one
+# constraint on visibility separates them). Transmissibility and susceptibility are one number, which
+# is why R0 is fixed rather than shared.
 plot_jm_mechanism = function(fit, ref = NULL){
   d = fit$d; th = fit$theta; S = d$n_season
   # a reference wave with a full grid and a clear peak, and NOT in the last season, whose visibility
@@ -452,7 +453,7 @@ plot_jm_fit_overview = function(fit){
     facet_grid(country ~ season, scales = "free_y") +
     labs(title = "Every country-season: the model against the data",
          subtitle = paste("Points are observed influenza-positive ILI consultations per 100 000, pooled over age groups by",
-                          "population weight; the line is the model at the joint optimum. One transmissibility and one",
+                          "population weight; the line is the model at the joint optimum. One susceptibility effect and one",
                           "visibility number per season must serve every country at once, so the line is not free to chase",
                           "each panel. A panel that misses is therefore information about the shared assumption, not just",
                           "about that country.", sep = "\n"),
@@ -471,7 +472,7 @@ plot_jm_fit_country = function(fit, cc){
     labs(title = paste0(cc, ": the three age groups, season by season"),
          subtitle = paste("Points observed, lines the model. The age profile comes from the contact matrix, the one global",
                           "elderly susceptibility and this country's two age reporting offsets. None of those varies by",
-                          "season, so every season-to-season change you see is produced by the shared transmissibility,",
+                          "season, so every season-to-season change you see is produced by the shared season effect on S0,",
                           "the shared season visibility and this wave's seed.", sep = "\n"),
          x = "week of the season", y = "ILI+ per 100 000 of the age group") +
     .jm_theme(9) + theme(axis.text = element_text(size = 6.5))
@@ -596,7 +597,9 @@ plot_jm_country_reporting = function(fit, iv = NULL){
          subtitle = paste0("The chance that one adult infection becomes an influenza-positive ILI consultation in that country's",
                           "\nsurveillance. A country low on this axis is not having fewer infections, it is seeing fewer of them.",
                           "\nThis is why raw ILI+ curves cannot be compared between countries and these numbers are what make",
-                          "\nthem comparable. Log scale: the spread is more than tenfold.", .jm_ivnote(iv)),
+                          "\nthem comparable. Log scale: the spread is more than tenfold. The ORDER and the spread are the data;",
+                          sprintf("\nthe level is set by the R0 pin (%g): at the same fit every value scales with R0, as attack rates scale with 1/R0.", d$R0_fixed),
+                          .jm_ivnote(iv)),
          x = "per cent of adult infections reported (log scale)", y = NULL) + .jm_theme()
 }
 
@@ -636,6 +639,9 @@ plot_jm_attack = function(fit){
   long = att %>% pivot_longer(all_of(d$groups), names_to = "group", values_to = "attack") %>%
     mutate(group = factor(group, levels = .jm_grp), season = factor(season, levels = d$seasons))
   p = jm_unpack(fit$theta, d)
+  # population-weighted attack rate per country-season, for the caption's statement about the level
+  med_all = median(vapply(seq_len(d$n_cs), function(i){ N = d$N[[d$cs_country[i] + 1L]]
+    sum(f$attack[i, ] * N) / sum(N) }, numeric(1)))
   ggplot(long, aes(season, attack, colour = group, group = interaction(country, group))) +
     geom_line(alpha = 0.32, linewidth = 0.5) +
     stat_summary(aes(group = group), fun = median, geom = "line", linewidth = 1.5) +
@@ -644,13 +650,14 @@ plot_jm_attack = function(fit){
     labs(title = "What it learns, 6: who actually gets infected",
          subtitle = paste0("Modelled share of each age group infected over a full ", d$attack_weeks,
                           "-week season. Thin lines are countries, thick lines",
-                          "\nthe median across them. This is the one output entirely free of reporting: it comes from the contact",
-                          "\nmatrix, the global elderly susceptibility (fitted at ", sprintf("%.2f", p$sigma_eld),
-                          "x an adult's) and vaccination, not from how",
-                          "\nmany consultations were counted. So compare it with prospective cohort evidence, never with",
-                          "\nsurveillance curves. The dynamics run to the same horizon for every country-season, so these are",
-                          "\ncomparable with each other: read over only the weeks each country happened to report, five cells",
-                          "\nmoved by more than 5% and one by 15% for no epidemiological reason at all."),
+                          "\nthe median across them. READ THE PATTERN, NOT THE LEVEL. The pattern -- which seasons, countries and",
+                          "\nage groups had more infection -- comes from the fitted waves, the contact matrix, the elderly",
+                          "\nsusceptibility (", sprintf("%.2f", p$sigma_eld), "x an adult's) and vaccination. The absolute level is set by the R0 pin",
+                          sprintf(" (%g):", d$R0_fixed),
+                          sprintf("\nR0 and S0 are one number to the data, so at the same fit every attack rate scales as 1/R0 (median %.0f%%",
+                                  100 * med_all),
+                          sprintf("\nhere; it would read %.0f%% at a pin of 1.5 and %.0f%% at 3). Compare shapes with cohort evidence, not levels.",
+                                  100 * med_all * d$R0_fixed / 1.5, 100 * med_all * d$R0_fixed / 3)),
          x = NULL, y = "attack rate") +
     .jm_theme() + theme(axis.text.x = element_text(angle = 30, hjust = 1))
 }
@@ -713,9 +720,9 @@ plot_jm_recovery = function(rec, d, summ = NULL){
                           "\nperfect recovery. Season susceptibility-effect rank correlation ",
                           sprintf("%.2f", summ$rank_shared$spearman_med[summ$rank_shared$block == "S0 season effect"][1]),
                           ", susceptibility ranking ", sprintf("%.2f", summ$rank_S0_spearman),
-                          ",\n95% interval coverage ", sprintf("%.0f%%", 100 * cov_txt),
-                          ". Orange triangles are ", n_off, " estimate(s) that fell outside",
-                          "\ntheir panel's range; they are drawn at the edge rather than dropped, so a failure cannot hide.",
+                          ",\n95% interval coverage ", sprintf("%.0f%%", 100 * cov_txt), ". ",
+                          if (n_off == 0) "No estimate fell outside its panel's range (one that did would be drawn\nas an orange triangle at the edge, not dropped, so a failure cannot hide)."
+                          else paste0("Orange triangles are ", n_off, " estimate(s) that fell outside\ntheir panel's range; they are drawn at the edge rather than dropped, so a failure cannot hide."),
                           "\nAnything the fit cannot recover from its own simulation cannot be trusted from real data either."),
          x = "true value", y = "estimated value") + .jm_theme()
 }

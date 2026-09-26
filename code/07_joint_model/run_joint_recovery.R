@@ -78,8 +78,9 @@ if (n_driver > 0){
   # parameters survives the fit-then-regress procedure.
   x = c(1, 0, 1, 0, 0, 1, 0, 1)[seq_len(d$n_season)]
   beta_x = 0.25; beta_delta = 0.35
-  cat(sprintf("truth: a one-sd move in the covariate shifts logit S0 by %.2f (about %+.0f%% on S0 at 0.8) and\n",
-              beta_x, 100 * (plogis(qlogis(0.8) + beta_x) / 0.8 - 1)))
+  S0_typ = median(vapply(jm_unpack(fit0$theta, d)$country, `[[`, 0, "S0"))   # the fitted typical level
+  cat(sprintf("truth: a one-sd move in the covariate shifts logit S0 by %.2f (about %+.0f%% on S0 at %.2f) and\n",
+              beta_x, 100 * (plogis(qlogis(S0_typ) + beta_x) / S0_typ - 1), S0_typ))
   cat(sprintf("       log season visibility by %.2f (about %.0f%%)\n", beta_delta, 100 * (exp(beta_delta) - 1)))
   rec3 = jm_recovery(d, truth_fn = function(i) jm_truth_with_driver(d, x, beta_x, beta_delta, anchor = fit0$theta),
                      n_rep = n_driver, seed0 = 4000L,
