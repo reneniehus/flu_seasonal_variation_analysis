@@ -1029,3 +1029,42 @@ spread of a week or more). Tau by country is recorded as tested and not adopted:
 consistent across waves, its values are not geography, and it costs S0's country ranking its
 identifiability. **For the owner:** a per-country spread becomes identifiable with outside information
 on how dispersed the regional peak times are within each country, used as a prior on each tau.
+
+## 2026-09-26 (later) -- the wave's fatness fixed; S0 also carries spatial structure; the R0 pin assessed
+
+**Owner decision.** A fatness parameter clearly interferes with S0, so the spatial spread is FIXED, not
+fitted, and S0 is acknowledged to capture a country's spatial structure too: the overlay of its local
+waves, which makes the national wave fatter than one well-mixed epidemic. Fixed at none
+(`tau_fixed = 0`): a fitted shared spread settled at about two days and changed nothing (S0 rank
+correlation 1.00 with no spread), so zero costs nothing measurable and says plainly that the model does
+not describe spread.
+
+**What changed in the code.** The fitted-tau slots (shared and per country), their priors and the
+`tau_by_country` switch are gone; `tau_fixed` (days, default 0, validated to 0-120) is read by the C++
+and the base-R reference alike. The spread kernel stays, for a fixed value set from outside information
+on regional peak timing; its exact properties (total, mean timing and both exponential rates kept; the
+variance grows by tau^2 + 1/12) stay under test. Back to 181 parameters: the pre-tau working fit
+evaluates to the identical log-likelihood under the new code (difference 0.0), and the refit converges
+to the same optimum. `run_tau_analysis.R` and `plot_tau_analysis.R` are removed with the fitted slots;
+the fitted-spread analysis and figure 18 are reproducible from commit `c9286b7`. Figure captions now
+read the pin and the spread from the fit instead of hard-coding them.
+
+**The R0 pin, assessed (owner asked: 1.7 or higher, now that the model is a sensor of shapes).**
+`run_pin_sweep.R` refits the working model at R0 = 1.5, 1.7, 2.0, 2.5 and 3.0, the S0 prior centre
+moving with the pin so the prior sits on the same R0 x S0. Findings (tables in MODEL.md, "The R0 pin"):
+- Off the ceiling the pin changes nothing relative: from 1.7 up the fit is flat within 2 nats, the
+  country S0 ranking holds at 0.99, the season effects correlate at 0.996 or more, visibility at 0.998.
+  No pin differs from 1.5 with the wave as the unit (sign test p 0.39-1.0).
+- 1.5 differs only through the ceiling: 8 cells above 0.95, 2025/26 compressed.
+- The pin sets the absolute scale only: the median attack rate is 32% at 1.5, 28% at 1.7, 24% at 2.0,
+  19% at 2.5, 16% at 3.0 (as 1/R0), and the reporting fraction rises as R0. R0 x S0 stays at 1.29, where
+  a systematic review puts seasonal influenza's reproduction number (1.28).
+
+**Recommendation to the owner (not yet applied).** Raise the pin to **2.0**, with the S0 prior centre
+moved to 0.5625 (= 0.75 x 1.5/2.0). 1.7 is the minimum that clears the ceiling, but its largest S0 is
+already 0.90: a season more extreme than 2025/26 would press the ceiling again, while 2.0 leaves room
+(largest S0 0.78) at no cost to any relative result. Going higher changes only the absolute scale;
+2.5 would bring the model's attack rate to about one in five, the order serological cohorts report
+per season, but the homogeneous SIR's final size is the least trustworthy number a shape sensor
+produces, so the pin should not be tuned to it. With S0 read as a sensor of the wave's shape, any pin
+from 1.7 up is a choice of units for S0; 2.0 is the choice that keeps the sensor off its stop.

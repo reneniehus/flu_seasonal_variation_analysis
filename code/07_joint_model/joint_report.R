@@ -218,15 +218,15 @@ plot_jm_mechanism = function(fit, ref = NULL){
   stopifnot(s_ix <= S - 1L)
   j = list(x = s_ix, delta = S - 1L + s_ix,
            S0 = base + 1L, c = base + 2L, off_eld = base + 4L, phi = base + 5L,
-           I0 = base + 5L + nsrc + d$cs_pos[i0] + 1L,
-           tau = if (isTRUE(d$tau_by_country)) base + d$n_local[ic] else 2L * S)
+           I0 = base + 5L + nsrc + d$cs_pos[i0] + 1L)
   N = d$N[[ic]]; per = d$rate_per / N
-  mu_of = function(theta, grp = 2L){
-    m = jm_fitted_cpp(theta, d)$mu[[i0]]
+  # the spatial spread is a FIXED setting of the data object, not a slot, so its panels vary d
+  mu_of = function(theta, grp = 2L, dd = d){
+    m = jm_fitted_cpp(theta, dd)$mu[[i0]]
     data.frame(week = seq_len(nrow(m)), value = m[, grp] * per[grp])
   }
   bump = function(slot, by){ t2 = th; t2[slot] = t2[slot] + by; t2 }
-  set_tau = function(v){ t2 = th; t2[j$tau] = v; t2 }
+  d_tau = function(v){ dd = d; dd$tau_fixed = v; dd }
   # full width at half maximum of a weekly curve, in weeks (linear interpolation at both crossings)
   fwhm = function(v){ H = max(v); p = which.max(v); n = length(v)
     a = max(c(0, which(seq_len(n) < p & v < H / 2))); b = min(c(n + 1, which(seq_len(n) > p & v < H / 2)))
@@ -237,7 +237,7 @@ plot_jm_mechanism = function(fit, ref = NULL){
   panels = list(
     list(key = "x_s  season effect on susceptibility", lo = bump(j$x, -0.25), hi = bump(j$x, 0.25),
          lab = c("-0.25 logit", "+0.25 logit"),
-         note = "Steeper AND taller, and it peaks earlier: more people to infect this season, everywhere. R0 itself is fixed at 1.5."),
+         note = sprintf("Steeper AND taller, and it peaks earlier: more people to infect this season, everywhere. R0 itself is fixed at %g.", d$R0_fixed)),
     list(key = "S0_c  the country's susceptibility level", lo = bump(j$S0, -0.25), hi = bump(j$S0, 0.25),
          lab = c("-0.25 logit", "+0.25 logit"),
          note = "The SAME lever as x_s -- both add to logit S0 -- but this one moves all of the country's seasons together."),
@@ -253,10 +253,10 @@ plot_jm_mechanism = function(fit, ref = NULL){
     list(key = "off_eld  age reporting, 65+", lo = bump(j$off_eld, -1), hi = bump(j$off_eld, 1),
          lab = c("half", "double"), grp = 3L,
          note = "Scales ONE age group's curve only (65+ shown). Surveillance, not biology."),
-    list(key = "tau  spread of the wave across the country", lo = set_tau(-30), hi = set_tau(log(14)),
+    list(key = "tau  spread of the wave across the country", lo = th, hi = th, d_lo = d_tau(0), d_hi = d_tau(14),
          lab = c("none", "14 days"),
          note = sprintf(paste("Lower, rounder, wider: the country's cities are hit at different times. The total and the",
-                              "early rise are unchanged. Fitted: %.1f days."), exp(th[j$tau])))
+                              "early rise are unchanged. FIXED at %g days, not fitted: S0 absorbs the overlay."), d$tau_fixed))
   )
   # colour by DIRECTION, not by the label: every panel then reads the same way -- blue is the lower
   # setting and orange the higher one, whatever the units of that particular parameter happen to be.
@@ -264,8 +264,8 @@ plot_jm_mechanism = function(fit, ref = NULL){
     g = if (is.null(p$grp)) 2L else p$grp
     if (any(is.na(unlist(p[c("lo", "hi")])))) return(NULL)
     rbind(cbind(mu_of(th, g),   dir = "as fitted", key = p$key),
-          cbind(mu_of(p$lo, g), dir = "lower",     key = p$key),
-          cbind(mu_of(p$hi, g), dir = "higher",    key = p$key))
+          cbind(mu_of(p$lo, g, if (is.null(p$d_lo)) d else p$d_lo), dir = "lower",  key = p$key),
+          cbind(mu_of(p$hi, g, if (is.null(p$d_hi)) d else p$d_hi), dir = "higher", key = p$key))
   }))
   # wrap to the panel width, or the note runs off the right edge and the sentence is lost
   notes = data.frame(key = vapply(panels, `[[`, character(1), "key"),
@@ -305,8 +305,8 @@ plot_jm_mechanism = function(fit, ref = NULL){
   # MIDDLE: two ways to make a wave FATTER, tuned to the same peak and the same width. Spread it over
   # the country (tau 14 days), or lower S0 by exactly enough to give the same width. Each is scaled by
   # c back to the fitted peak height.
-  to_peak = function(t2){ t2[j$c] = t2[j$c] + log(base_pk / max(mu_of(t2)$value)); t2 }
-  t_sp = to_peak(set_tau(log(14))); w_sp = fwhm(mu_of(t_sp)$value)
+  to_peak = function(t2, dd = d){ t2[j$c] = t2[j$c] + log(base_pk / max(mu_of(t2, dd = dd)$value)); t2 }
+  d14 = d_tau(14); t_sp = to_peak(th, d14); w_sp = fwhm(mu_of(t_sp, dd = d14)$value)
   shifts = seq(-1.2, 0, by = 0.02)
   w_s0 = vapply(shifts, function(z) fwhm(mu_of(to_peak(bump(j$S0, z)))$value), numeric(1))
   z_s0 = shifts[which.min(abs(w_s0 - w_sp))]
@@ -318,7 +318,7 @@ plot_jm_mechanism = function(fit, ref = NULL){
                                                                         pair = "same peak: susceptibility vs visibility"),
              cbind(mu_of(th),    set = "as fitted",                     pair = fat),
              cbind(mu_of(t_s0),  set = sprintf("S0 %+.2f logit (less susceptible)", z_s0), pair = fat),
-             cbind(mu_of(t_sp),  set = "tau 14 days (more spread)",     pair = fat),
+             cbind(mu_of(t_sp, dd = d14), set = "tau 14 days (more spread)", pair = fat),
              cbind(mu_of(th),    set = "as fitted",                     pair = "c x delta held constant"),
              cbind(mu_of(t_cdel), set = "c +50%, visibility /1.5",      pair = "c x delta held constant"))
   tr$set = factor(tr$set, levels = unique(tr$set))
@@ -366,16 +366,13 @@ jm_design_spec = function(d){
     "dynamics",    "x_s  season effect on S0",   TRUE,  FALSE, FALSE, S - 1L,      "one per season, added to every country's logit S0; average zero",
     "dynamics",    "sigma  elderly suscept.",   FALSE, FALSE, TRUE,  1,           "one number for everyone",
     "dynamics",    "I0  seed / arrival",        TRUE,  TRUE,  FALSE, d$n_cs,      "free for every wave: sets when it arrives",
-    "dynamics",    "tau  spatial spread",       FALSE, isTRUE(d$tau_by_country), FALSE,
-                   if (isTRUE(d$tau_by_country)) C else 1L,
-                   if (isTRUE(d$tau_by_country)) "one per country: how far apart in time its cities are hit"
-                   else "one number: how far apart in time a country's cities are hit",
     "observation", "c  reporting level",        FALSE, TRUE,  FALSE, C,           "one per surveillance system",
     "observation", "delta  season visibility",  TRUE,  FALSE, FALSE, S - 1L,      "one per season, the last set by the average-one constraint",
     "observation", "off  age reporting",        FALSE, TRUE,  TRUE,  2 * C,       "adults the reference",
     "observation", "b  off-season baseline",    FALSE, TRUE,  FALSE, sum(d$n_src),"one per data source present",
     "observation", "phi  dispersion",           FALSE, TRUE,  FALSE, C,           "one per country",
-    "fixed",       "R0  transmissibility",      FALSE, FALSE, FALSE, 0L,          "1.5 everywhere: S0 is the sensor of how easily a season spread",
+    "fixed",       "R0  transmissibility",      FALSE, FALSE, FALSE, 0L,          sprintf("%g everywhere: S0 is the sensor of how easily a season spread", d$R0_fixed),
+    "fixed",       "tau  spatial spread",       FALSE, FALSE, FALSE, 0L,          sprintf("%g days: S0 also absorbs the overlay of a country's local waves", d$tau_fixed),
     "fixed",       "gamma  infectious period",  FALSE, FALSE, FALSE, 0L,          "3.6 days, from the literature",
     "fixed",       "vaccine effects (3)",       FALSE, FALSE, TRUE,  0L,          "fixed, 65+ pulse on 1 October",
     "fixed",       "contact matrix",            FALSE, TRUE,  TRUE,  0L,          "fixed, rescaled to spectral radius 1")
@@ -523,10 +520,11 @@ plot_jm_season_S0 = function(fit, iv = NULL){
     geom_text(aes(label = sprintf("%.3f", S0_typical)), vjust = -1.4, size = 3, colour = "grey20") +
     labs(title = "What it learns, 1: how easily each season spread",
          subtitle = paste0("The season effect on susceptibility, shown as the susceptible fraction a TYPICAL country had that",
-                          "\nseason (the median country level plus the season's shift). R0 is fixed at 1.5, so this is the model's",
-                          "\nonly sensor of how easily a season spread: a novel strain, waned immunity and a genuinely more",
-                          "\ntransmissible virus all land here. ONE shift per season for the whole of Europe. Shaded band is the",
-                          "\nprior's 95% range around the typical level, dashed line its centre.", .jm_ivnote(iv)),
+                          sprintf("\nseason (the median country level plus the season's shift). R0 is fixed at %g, so this is the model's", d$R0_fixed),
+                          "\nonly sensor of how easily a season spread: a novel strain, waned immunity, a genuinely more",
+                          "\ntransmissible virus and a wave spread out over more weeks across a country's cities all land here.",
+                          "\nONE shift per season for the whole of Europe. Shaded band is the prior's 95% range around the",
+                          "\ntypical level, dashed line its centre.", .jm_ivnote(iv)),
          x = NULL, y = "susceptible fraction, typical country") +
     .jm_theme() + theme(axis.text.x = element_text(angle = 30, hjust = 1))
 }
@@ -572,11 +570,12 @@ plot_jm_country_S0 = function(fit, iv = NULL){
     scale_x_continuous(limits = c(0, 1.15), breaks = seq(0, 1, 0.25)) +
     labs(title = "What it learns, 3: how susceptible each country was at the season start",
          subtitle = paste0("Each country's susceptible fraction on 1 August at the AVERAGE season; the season effect is added to",
-                          "\nit on the logit scale, so seasons shift every country together. With R0 fixed at 1.5 this is",
-                          "\nidentified by the rise rate of each wave and nothing else trades against it. The caveat to carry:",
-                          "\nR0 is held equal in every country, so any real difference in transmissibility -- more elderly",
-                          "\ncontacts, denser mixing -- has nowhere to go but here. Read it as 'how easily influenza spreads in",
-                          "\nthis country', a composite, and trust the ranking over the absolute level.",
+                          sprintf("\nit on the logit scale, so seasons shift every country together. With R0 fixed at %g this is", d$R0_fixed),
+                          "\nidentified by the shape of each wave and nothing fitted trades against it. The caveat to carry:",
+                          "\nR0 and the spatial spread are held equal in every country, so any real difference in transmissibility",
+                          "\n-- more elderly contacts, denser mixing -- or in how far apart its cities are hit has nowhere to go",
+                          "\nbut here. Read it as 'how easily influenza spreads in this country', a composite, and trust the",
+                          "\nranking over the absolute level.",
                           .jm_ivnote(iv)),
          x = "S0", y = NULL) + .jm_theme()
 }

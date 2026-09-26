@@ -2,8 +2,8 @@
 # The model itself is MODEL.md; the log-posterior is joint_model.cpp; this file is the driver.
 #
 # Fitting strategy, and why. The likelihood is SEPARABLE: only the two season effects, the one elderly
-# susceptibility and the shared spatial spread appear in more than one country's terms. Everything
-# else is local to a single country. A flat finite-difference gradient over ~182 parameters costs 183 full-likelihood
+# susceptibility appear in more than one country's terms. Everything else is local to a single
+# country. A flat finite-difference gradient over ~181 parameters costs 182 full-likelihood
 # evaluations; a block sweep costs about 33, because a country's own likelihood is a twelfth of the
 # joint one. So we alternate: every country's local block optimised in parallel with the shared block
 # held fixed, then the shared block with the locals held fixed, repeated, then one joint polish.
@@ -29,10 +29,13 @@ jm_settings = function(){
     # Which one senses is therefore an informed judgement, not a data result: R0 is pinned from the
     # literature and S0 is a deliberately BLUNT sensor of susceptibility and infectivity together.
     R0_fixed = 1.5,
-    # SPATIAL SPREAD (2026-09-26). A country's cities are hit at slightly different times; the
-    # national curve is the local epidemic spread over start times N(0, tau^2) days (MODEL.md). One
-    # tau shared by every country and season, or -- the variant under test -- one per country.
-    tau_by_country = FALSE,
+    # SPATIAL SPREAD, FIXED (owner, 2026-09-26). A country's cities are hit at slightly different
+    # times, which fattens the national wave. Fitted, a spread parameter lay on a ridge with S0 and, per
+    # country, cost S0's country ranking its identifiability (MODEL.md), so it is fixed like R0: at 0 by
+    # default, and S0 absorbs the overlay of a country's local waves along with susceptibility and
+    # infectivity. A positive value (days, the sd of the local epidemics' start times) is for outside
+    # information on regional peak timing.
+    tau_fixed = 0,
     # priors, all on the unconstrained scale the fit works in
     pr_x_sd = 0.5,                            # season effect on logit S0, centred on zero. At S0 ~ 0.8
                                               # one sd is ~ +/-0.09 on S0 itself; wide enough for the
@@ -52,10 +55,7 @@ jm_settings = function(){
     pr_phi_mean = log(4), pr_phi_sd = 1.0,
     pr_b_mean = log(1), pr_b_sd = 2,          # NEW: the pilot left b unpenalised, which left a
                                               # single-season baseline effectively free
-    pr_I0_mean = log(10^-6.5), pr_I0_sd = 3,
-    # log tau, days. Centre one week: regional peaks within a large European country are spread over a
-    # few weeks, in a small one over days. 95% band 1.8-27 days, so the data decide within it.
-    pr_tau_mean = log(7), pr_tau_sd = 0.7
+    pr_I0_mean = log(10^-6.5), pr_I0_sd = 3
   )
 }
 
@@ -177,10 +177,10 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
   srcs = lapply(cds, function(cd) sort(unique(unname(cd$source_by_season))))
   n_src = vapply(srcs, length, integer(1))
   n_cs_of_country = vapply(cds, function(cd) length(cd$seasons), integer(1))
-  tau_c = isTRUE(set$tau_by_country)
-  # S0, c, 2 offsets, phi, baselines, seeds -- and the country's own spread when tau is by country
-  n_local = 5L + n_src + n_cs_of_country + as.integer(tau_c)
-  n_shared = 2L * S - 1L + as.integer(!tau_c)            # S-1 free x, S-1 free delta, log2 sigma, [log tau]
+  n_local = 5L + n_src + n_cs_of_country                 # S0, c, 2 offsets, phi, baselines, seeds
+  n_shared = 2L * S - 1L                                 # S-1 free x, S-1 free delta, 1 log2 sigma
+  if (!(is.numeric(set$tau_fixed) && length(set$tau_fixed) == 1L && set$tau_fixed >= 0 && set$tau_fixed <= 120))
+    stop("tau_fixed must be one number of days between 0 and 120")
   off_country = as.integer(cumsum(c(n_shared, head(n_local, -1))))   # 0-based starts
   n_par = as.integer(n_shared + sum(n_local))
 
@@ -237,7 +237,7 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
     rates = unlist(lapply(cds, `[[`, "rates"), recursive = FALSE),
     gamma = set$gamma_per_day, ve_inf = set$ve_inf, ve_ili = set$ve_ili,
     ve_spread = set$ve_spread, rate_per = set$rate_per, vax_day = set$vax_day,
-    R0_fixed = set$R0_fixed, tau_by_country = tau_c,
+    R0_fixed = set$R0_fixed, tau_fixed = set$tau_fixed,
     # The DYNAMICS horizon, distinct from the observation windows. Each country-season is observed for
     # however long its surveillance series runs (33 to 53 weeks here), but the attack rate has to mean
     # the same thing in every cell to be comparable across them and against cohort evidence, so the
@@ -269,15 +269,12 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
 # ---- |-the parameter vector: names, index blocks, starting values ----
 jm_par_names = function(d){
   S = d$n_season
-  tc = isTRUE(d$tau_by_country)
-  nm = c(paste0("x_", head(d$seasons, S - 1)), paste0("delta_", head(d$seasons, S - 1)), "log2_sigma_eld",
-         if (!tc) "log_tau")
+  nm = c(paste0("x_", head(d$seasons, S - 1)), paste0("delta_", head(d$seasons, S - 1)), "log2_sigma_eld")
   for (ic in seq_len(d$n_country)){
     cc = d$countries[ic]
     nm = c(nm, paste0(cc, c(":logit_S0", ":log_c", ":off_young", ":off_eld", ":log_phi")),
            paste0(cc, ":log_b_", d$sources[[ic]]),
-           paste0(cc, ":log_I0_", d$seasons[d$cs_season[d$cs_of_country[[ic]] + 1L] + 1L]),
-           if (tc) paste0(cc, ":log_tau"))
+           paste0(cc, ":log_I0_", d$seasons[d$cs_season[d$cs_of_country[[ic]] + 1L] + 1L]))
   }
   nm
 }
@@ -293,7 +290,6 @@ jm_theta0 = function(d, set = jm_settings()){
   th[seq_len(S - 1)] = 0                                # no season effect on susceptibility
   th[S - 1L + seq_len(S - 1)] = 0                       # no season effect on visibility
   th[2L * S - 1L] = set$pr_sigma_mean                   # elderly susceptibility at 2x
-  if (!isTRUE(d$tau_by_country)) th[2L * S] = set$pr_tau_mean       # spread at the prior centre
   r0 = set$gamma_per_day * (set$R0_fixed * 0.8 - 1)     # a plausible early growth rate, per day
   for (ic in seq_len(d$n_country)){
     base = d$off_country[ic]
@@ -329,7 +325,6 @@ jm_theta0 = function(d, set = jm_settings()){
       w = which(sm >= 0.1 * pk)[1]
       if (is.na(w)) 12 else min(max(w, 4), 34) }, numeric(1))
     th[base + 5 + d$n_src[ic] + seq_along(ics)] = set$pr_I0_mean - r0 * 7 * (onset - 12)
-    if (isTRUE(d$tau_by_country)) th[base + d$n_local[ic]] = set$pr_tau_mean
   }
   names(th) = jm_par_names(d)
   th
@@ -618,8 +613,7 @@ jm_unpack = function(th, d){
              x = setNames(x, d$seasons),           # the season effect on logit S0
              delta = setNames(c(dev_free, -sum(dev_free)), d$seasons),
              sigma_eld = unname(2^th[2L * S - 1L]),
-             # the spatial spread in days: one number, or NA here and one per country below
-             tau = if (isTRUE(d$tau_by_country)) NA_real_ else unname(exp(th[2L * S])))
+             tau = unname(d$tau_fixed))                     # the fixed spatial spread, days
   cty = lapply(seq_len(d$n_country), function(ic){
     base = d$off_country[ic]; ics = d$cs_of_country[[ic]] + 1L
     ss = d$cs_season[ics] + 1L; sn = d$seasons[ss]
@@ -633,8 +627,7 @@ jm_unpack = function(th, d){
          off_young = unname(th[base + 3]), off_eld = unname(th[base + 4]),
          phi = unname(exp(th[base + 5])),
          b = setNames(exp(th[base + 5 + seq_len(d$n_src[ic])]), d$sources[[ic]]),
-         I0 = setNames(exp(th[base + 5 + d$n_src[ic] + seq_along(ics)]), d$seasons[d$cs_season[ics] + 1L]),
-         tau = unname(if (isTRUE(d$tau_by_country)) exp(th[base + d$n_local[ic]]) else exp(th[2L * S])))
+         I0 = setNames(exp(th[base + 5 + d$n_src[ic] + seq_along(ics)]), d$seasons[d$cs_season[ics] + 1L]))
   })
   names(cty) = d$countries
   out$country = cty
@@ -649,7 +642,6 @@ jm_summary_country = function(fit){
              rel_young = 2^vapply(p$country, `[[`, numeric(1), "off_young"),
              rel_elderly = 2^vapply(p$country, `[[`, numeric(1), "off_eld"),
              phi = vapply(p$country, `[[`, numeric(1), "phi"),
-             tau_days = vapply(p$country, `[[`, numeric(1), "tau"),
              n_seasons = d$n_cs_of_country,
              # whose mixing pattern this country's age offsets were fitted under: a country on the EU
              # average has no contact matrix of its own, and the offsets are the parameters most
@@ -686,9 +678,9 @@ jm_summary_season = function(fit){
 # are right. tests/testthat/test-joint-model.R requires 1e-10.
 # The spatial spread is likewise computed a DIFFERENT way: here as the direct daily convolution of the
 # local incidence with the kernel (pnorm differences), then summed per week, where the C++ works on the
-# cumulative incidence at week boundaries (erfc). And here it is ALWAYS applied -- at a vanishing tau
-# the kernel is exactly (0, 1, 0) -- whereas the C++ takes its untouched no-spread path below 0.05
-# days, so the identity test also checks that the short cut is the limit it claims to be.
+# cumulative incidence at week boundaries (erfc). And here it is ALWAYS applied -- at tau = 0 the kernel
+# is exactly the single weight 1 -- whereas the C++ takes its untouched no-spread path below 0.05 days,
+# so the identity test also checks that the short cut is the limit it claims to be.
 jm_negll_R = function(th, d){
   S = d$n_season; A = 3L
   x_free = th[seq_len(S - 1)]; xs = c(x_free, -sum(x_free))
@@ -696,11 +688,12 @@ jm_negll_R = function(th, d){
   dev = exp(c(dev_free, -sum(dev_free)))
   sigma = c(1, 1, 2^th[2L * S - 1L])
   dn = function(x, m, s) -0.5 * ((x - m) / s)^2 - log(s) - 0.5 * log(2 * pi)
-  tc = isTRUE(d$tau_by_country)
   lp = sum(dn(xs, 0, d$pr_x_sd)) +
        sum(dn(c(dev_free, -sum(dev_free)), 0, d$pr_delta_sd)) +
-       dn(th[2L * S - 1L], d$pr_sigma_mean, d$pr_sigma_sd) +
-       (if (tc) 0 else dn(th[2L * S], d$pr_tau_mean, d$pr_tau_sd))
+       dn(th[2L * S - 1L], d$pr_sigma_mean, d$pr_sigma_sd)
+  tau = d$tau_fixed
+  K = ceiling(7 * tau)
+  w = diff(pnorm((seq(-K, K + 1) - 0.5) / tau)); w = w / sum(w)   # mass of N(0, tau^2) per day bin
   for (ic in seq_len(d$n_country)){
     base = d$off_country[ic]; nsrc = d$n_src[ic]
     logit_S0_c = th[base + 1]; cc = exp(th[base + 2])
@@ -709,11 +702,6 @@ jm_negll_R = function(th, d){
     if (!(phi <= 1e8)) return(1e10)          # the phi hole: rejected, exactly as the .cpp does
     b = exp(th[base + 5 + seq_len(nsrc)])
     I0v = exp(th[base + 5 + nsrc + seq_len(d$n_cs_of_country[ic])])
-    log_tau = if (tc) th[base + d$n_local[ic]] else th[2L * S]
-    tau = exp(log_tau)
-    if (!(tau <= 120)) return(1e10)          # the cap, exactly as the .cpp does
-    K = ceiling(7 * tau)
-    w = diff(pnorm((seq(-K, K + 1) - 0.5) / tau)); w = w / sum(w)   # mass of N(0, tau^2) per day bin
     Cs = sweep(d$Cn[[ic]], 1, sigma, "*")
     Cs = Cs / max(abs(eigen(Cs, only.values = TRUE)$values))
     N = d$N[[ic]]
@@ -756,8 +744,7 @@ jm_negll_R = function(th, d){
          dn(th[base + 2], d$pr_c_mean, d$pr_c_sd) +
          dn(th[base + 3], 0, d$pr_off_sd) + dn(th[base + 4], 0, d$pr_off_sd) +
          dn(th[base + 5], d$pr_phi_mean, d$pr_phi_sd) +
-         sum(dn(th[base + 5 + seq_len(nsrc)], d$pr_b_mean, d$pr_b_sd)) +
-         (if (tc) dn(log_tau, d$pr_tau_mean, d$pr_tau_sd) else 0)
+         sum(dn(th[base + 5 + seq_len(nsrc)], d$pr_b_mean, d$pr_b_sd))
   }
   unname(-lp)              # a log-posterior is a scalar: strip the name lp inherits from theta
 }
@@ -778,8 +765,6 @@ jm_identifiability = function(fit, verbose = TRUE){
   secs = as.numeric(difftime(Sys.time(), t0, units = "secs"))
   S = d$n_season
   fam = ifelse(grepl("^x_", nm), "S0 season effect (shared)",
-        ifelse(grepl("^log_tau$", nm), "spatial spread tau (shared)",
-        ifelse(grepl(":log_tau$", nm), "spatial spread tau (country)",
         ifelse(grepl("^delta_", nm), "season deviation (shared)",
         ifelse(grepl("log2_sigma", nm), "elderly susceptibility (global)",
         ifelse(grepl(":logit_S0", nm), "S0 (country)",
@@ -787,9 +772,8 @@ jm_identifiability = function(fit, verbose = TRUE){
         ifelse(grepl(":off_", nm), "age reporting offset",
         ifelse(grepl(":log_phi", nm), "dispersion phi",
         ifelse(grepl(":log_b_", nm), "baseline b",
-        ifelse(grepl(":log_I0_", nm), "seed I0 (country-season)", nm)))))))))))
+        ifelse(grepl(":log_I0_", nm), "seed I0 (country-season)", nm)))))))))
   pr_sd = ifelse(grepl("^x_", nm), d$pr_x_sd,
-          ifelse(grepl("log_tau$", nm), d$pr_tau_sd,
           ifelse(grepl("^delta_", nm), d$pr_delta_sd,
           ifelse(grepl("log2_sigma", nm), d$pr_sigma_sd,
           ifelse(grepl(":logit_S0", nm), d$pr_S0_sd,
@@ -797,7 +781,7 @@ jm_identifiability = function(fit, verbose = TRUE){
           ifelse(grepl(":off_", nm), d$pr_off_sd,
           ifelse(grepl(":log_phi", nm), d$pr_phi_sd,
           ifelse(grepl(":log_b_", nm), d$pr_b_sd,
-          ifelse(grepl(":log_I0_", nm), d$pr_I0_sd, NA_real_))))))))))
+          ifelse(grepl(":log_I0_", nm), d$pr_I0_sd, NA_real_)))))))))
   e_lik = eigen(H_lik, symmetric = TRUE, only.values = TRUE)$values
   e_post = eigen(H_post, symmetric = TRUE, only.values = TRUE)$values
   V_post = tryCatch(solve(H_post), error = function(e) NULL)

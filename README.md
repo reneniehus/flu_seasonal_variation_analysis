@@ -126,9 +126,9 @@ code/07_joint_model/           THE WORKING MODEL (branch flu_comp_model): all co
                                hook for the learning layer), joint_report.R (the default numbered
                                figure set), run_joint_model.R, run_joint_recovery.R;
                                joint_compare.R (model comparison with the wave as the unit),
-                               run_tau_analysis.R + plot_tau_analysis.R (the spatial spread tau:
-                               shared vs by country, and what makes a wave fat; figure 18). (The
-                               S0-vs-R0 sensing comparison, figure 17, lives at commit 7b04681.)
+                               run_pin_sweep.R (what the R0 pin's value does). (The S0-vs-R0
+                               sensing comparison, figure 17, lives at commit 7b04681; the fitted
+                               spatial-spread analysis, figure 18, at commit c9286b7.)
 code/06_comp_model/            the compartmental PILOT that preceded it, kept for its assumption
                                record and its data layer (build_comp_data is still used):
                                ASSUMPTIONS.md (every assumption, with provenance and evidence),
