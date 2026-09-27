@@ -52,7 +52,7 @@ th <- jm_theta0(d)
   f <- here::here("output/joint_model/joint_fit.rds")
   if (!file.exists(f)) return(NULL)
   o <- readRDS(f)
-  ok <- !is.null(o$fit$d$R0_fixed) && !is.null(o$fit$d$tau_fixed) &&
+  ok <- !is.null(o$fit$d$R0_fixed) && !is.null(o$fit$d$tau_fixed) && !is.null(o$fit$d$pr_kappa_mean) &&
         length(o$fit$theta) == length(jm_par_names(o$fit$d))
   if (isTRUE(ok)) o else NULL
 })
@@ -80,9 +80,11 @@ test_that("every parameter slot is read back as its name says, and the deviation
   expect_equal(sum(p$delta), 0, tolerance = 1e-12)            # the constraint that removes the pilot's flat direction
   expect_equal(log2(p$sigma_eld), unname(probe[2L * S - 1L]))
   expect_equal(p$tau, d$tau_fixed)                            # the spread is fixed, not a slot
+  expect_equal(log(p$kappa_young), unname(probe[2L * S]))      # the children's S0 modifier
   for (ic in seq_len(d$n_country)){
     b <- d$off_country[ic]; q <- p$country[[ic]]
     expect_equal(qlogis(q$S0), unname(probe[b + 1]))
+    expect_equal(qlogis(q$S0_young), unname(probe[b + 1]) + p$kappa_young)
     expect_equal(log(q$c),     unname(probe[b + 2]))
     expect_equal(q$off_young,  unname(probe[b + 3]))
     expect_equal(q$off_eld,    unname(probe[b + 4]))
@@ -238,11 +240,12 @@ test_that("the C++ and R implementations agree where the pool cap BINDS, not jus
     expect_equal(jm_negll_cpp(th, with_R0(R0)), jm_negll_R(th, with_R0(R0)), tolerance = 1e-9,
                  info = paste("R0 =", R0))
   # and the invariant the cap restores: nobody is infected more than once, i.e. no age group's attack
-  # rate exceeds that country-season's own susceptible fraction
+  # rate exceeds its own susceptible fraction that country-season (children's is raised by kappa)
   d40 <- with_R0(40); f <- jm_fitted_cpp(th, d40); p <- jm_unpack(th, d40)
   for (i in seq_len(d$n_cs)){
-    S0_cs <- p$country[[d$cs_country[i] + 1L]]$S0_season[[d$seasons[d$cs_season[i] + 1L]]]
-    expect_lte(max(f$attack[i, ]), S0_cs + 1e-9)
+    q <- p$country[[d$cs_country[i] + 1L]]; sn <- d$seasons[d$cs_season[i] + 1L]
+    expect_lte(f$attack[i, 1], q$S0_young_season[[sn]] + 1e-9)
+    expect_lte(max(f$attack[i, 2:3]), q$S0_season[[sn]] + 1e-9)
   }
 })
 
@@ -516,14 +519,15 @@ test_that("the default design is the documented one, and the attack rate is a se
   # TWO documented designs, and both are pinned. Without the positivity-encoding exclusion the
   # min_seasons = 5 decision gives 12 / 86 / 183; with it (the default since 2026-09-16, provisional
   # pending surveillance confirmation) CZ 2024/2025 is dropped and CZ loses the ERVISS baseline slot
-  # that had no off-season behind it, giving 12 / 85 / 181. (R0 fixed since 2026-09-25: the
-  # shared block is 2S-1, the S slots of the old per-season R0 gone; the spread is fixed, not a slot.)
+  # that had no off-season behind it, giving 12 / 85 / 182. (R0 fixed since 2026-09-25: the S slots of
+  # the old per-season R0 are gone; the spread is fixed, not a slot; the children's S0 modifier added
+  # one shared slot on 2026-09-27.)
   full <- withr::with_dir(here::here(),
             jm_build_data(cand, models_in, demo, verbose = FALSE,
                           exclude_ambiguous_positivity = FALSE))
-  expect_equal(c(full$n_country, full$n_cs, full$n_par), c(12L, 86L, 183L))
+  expect_equal(c(full$n_country, full$n_cs, full$n_par), c(12L, 86L, 184L))
   dd <- withr::with_dir(here::here(), jm_build_data(cand, models_in, demo, verbose = FALSE))
-  expect_equal(c(dd$n_country, dd$n_cs, dd$n_par), c(12L, 85L, 181L))
+  expect_equal(c(dd$n_country, dd$n_cs, dd$n_par), c(12L, 85L, 182L))
   expect_true("ES" %in% dd$countries)            # the country the min_seasons decision was about
   expect_equal(dd$n_season, 8L)                  # no season is lost entirely by the exclusion
   # the dynamics horizon is a full season for every cell, and the observation windows are not
@@ -654,7 +658,7 @@ test_that("the ambiguous positivity encoding is detected and its seasons exclude
   bl <- jm_blocks(with_ex)
   expect_equal(sort(c(bl$shared, unlist(bl$local))), seq_len(with_ex$n_par))
   expect_equal(with_ex$n_par, with_ex$n_shared + sum(with_ex$n_local))
-  expect_equal(with_ex$n_shared, 2L * with_ex$n_season - 1L)  # x, delta and sigma
+  expect_equal(with_ex$n_shared, 2L * with_ex$n_season)       # x, delta, sigma and the children's kappa
   expect_true(is.finite(jm_negll_cpp(jm_theta0(with_ex), with_ex)))
   for (ic in seq_len(with_ex$n_country))   # a source slot must never survive without data
     expect_equal(with_ex$n_src[ic],
@@ -693,7 +697,8 @@ test_that("the shared priors are counted once, not once per country", {
   x_free <- th[seq_len(S - 1)]; dev_free <- th[S - 1L + seq_len(S - 1)]
   expected <- -(sum(dn(c(x_free, -sum(x_free)), 0, d$pr_x_sd)) +
                 sum(dn(c(dev_free, -sum(dev_free)), 0, d$pr_delta_sd)) +
-                dn(th[2L * S - 1L], d$pr_sigma_mean, d$pr_sigma_sd))
+                dn(th[2L * S - 1L], d$pr_sigma_mean, d$pr_sigma_sd) +
+                dn(th[2L * S], d$pr_kappa_mean, d$pr_kappa_sd))
   expect_equal(unname(nl - parts), unname(expected), tolerance = 1e-8)
 })
 
@@ -721,6 +726,7 @@ test_that("no fitted slot is left without a prior", {
   # log-prior curvature is -2/sd^2: its own term plus the constrained term's dependence on it
   expect_equal(curv[1], -2 / d$pr_x_sd^2, tolerance = 1e-6)                 # x of season 1
   expect_equal(curv[d$n_season], -2 / d$pr_delta_sd^2, tolerance = 1e-6)    # delta of season 1
+  expect_equal(curv[2L * d$n_season], -1 / d$pr_kappa_sd^2, tolerance = 1e-6) # the children's kappa
   # and the contraction denominator must be the sd the C++ actually applied, per family
   skip_if(is.null(.jm_cached), "no saved fit, or it predates this parameter layout")
   fam <- .jm_cached$id$family
@@ -728,7 +734,8 @@ test_that("no fitted slot is left without a prior", {
             "reporting c (country)" = d$pr_c_sd, "season deviation (shared)" = d$pr_delta_sd,
             "dispersion phi" = d$pr_phi_sd, "baseline b" = d$pr_b_sd,
             "age reporting offset" = d$pr_off_sd, "seed I0 (country-season)" = d$pr_I0_sd,
-            "elderly susceptibility (global)" = d$pr_sigma_sd)
+            "elderly susceptibility (global)" = d$pr_sigma_sd,
+            "children's S0 modifier (global)" = d$pr_kappa_sd)
   for (k in names(want)) if (k %in% fam$family)
     expect_equal(fam$prior_sd[fam$family == k], unname(want[[k]]), tolerance = 1e-9, info = k)
 })
@@ -889,4 +896,30 @@ test_that("an impossible spread is refused, and so is a data object from the fit
   # every country block by one, so the engine refuses rather than guesses
   stale <- d; stale$tau_fixed <- NULL
   expect_error(jm_negll_cpp(th, stale), "tau_fixed")
+})
+
+# ---- the children's S0 modifier ----
+test_that("the children's S0 modifier only raises children's S0, and vanishes as kappa goes to zero", {
+  # Children carry less immunity from past seasons, so they start each season more susceptible
+  # (owner, 2026-09-27). One global kappa, applied on the logit scale and constrained positive.
+  S <- d$n_season; j <- 2L * S
+  expect_identical(jm_par_names(d)[j], "log_kappa_young")
+  at <- function(v){ t2 <- th; t2[j] <- v; t2 }
+  for (v in c(-30, log(0.3), 0, log(3))){
+    t2 <- at(v); p <- jm_unpack(t2, d)
+    # the C++ and the base-R reference agree across the range
+    expect_equal(jm_negll_cpp(t2, d), jm_negll_R(t2, d), tolerance = 1e-10, info = paste("log kappa", v))
+    # children's S0 is never below the adults', and adults' and the elderly's do not move
+    for (q in p$country) expect_true(all(q$S0_young_season >= q$S0_season))
+    expect_equal(jm_unpack(t2, d)$country[[1]]$S0_season, jm_unpack(th, d)$country[[1]]$S0_season)
+  }
+  # as kappa goes to zero the children's S0 becomes the adults' and the modifier disappears
+  p0 <- jm_unpack(at(-30), d)
+  for (q in p0$country) expect_equal(unname(q$S0_young_season), unname(q$S0_season), tolerance = 1e-12)
+  # a larger kappa means more infected children in every country-season, and no fewer adults
+  a1 <- jm_fitted_cpp(at(log(0.3)), d)$attack; a2 <- jm_fitted_cpp(at(log(1)), d)$attack
+  expect_true(all(a2[, 1] > a1[, 1]))
+  # a data object from before the modifier is refused rather than misread
+  stale <- d; stale$pr_kappa_mean <- NULL
+  expect_error(jm_negll_cpp(th, stale), "predates the children")
 })

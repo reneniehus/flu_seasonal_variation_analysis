@@ -219,7 +219,7 @@ plot_jm_mechanism = function(fit, ref = NULL){
   stopifnot(s_ix <= S - 1L)
   j = list(x = s_ix, delta = S - 1L + s_ix,
            S0 = base + 1L, c = base + 2L, off_eld = base + 4L, phi = base + 5L,
-           I0 = base + 5L + nsrc + d$cs_pos[i0] + 1L)
+           I0 = base + 5L + nsrc + d$cs_pos[i0] + 1L, kappa = 2L * S)
   N = d$N[[ic]]; per = d$rate_per / N
   # the spatial spread is a FIXED setting of the data object, not a slot, so its panels vary d
   mu_of = function(theta, grp = 2L, dd = d){
@@ -254,6 +254,10 @@ plot_jm_mechanism = function(fit, ref = NULL){
     list(key = "off_eld  age reporting, 65+", lo = bump(j$off_eld, -1), hi = bump(j$off_eld, 1),
          lab = c("half", "double"), grp = 3L,
          note = "Scales ONE age group's curve only (65+ shown). Surveillance, not biology."),
+    list(key = "kappa  children's extra susceptibility", lo = { t2 = th; t2[j$kappa] = -30; t2 }, hi = bump(j$kappa, log(2)),
+         lab = c("none", "double"), grp = 1L,
+         note = sprintf(paste("Raises children's S0 on the logit scale, for every country and season (children",
+                              "shown): their wave grows taller and earlier. Fitted: +%.2f logit."), exp(th[j$kappa]))),
     list(key = "tau  spread of the wave across the country", lo = th, hi = th, d_lo = d_tau(0), d_hi = d_tau(14),
          lab = c("none", "14 days"),
          note = sprintf(paste("Lower, rounder, wider: the country's cities are hit at different times. The total and the",
@@ -366,6 +370,7 @@ jm_design_spec = function(d){
     "dynamics",    "S0_c  susceptibility level", FALSE, TRUE,  FALSE, C,           "one per country: its S0 at the average season",
     "dynamics",    "x_s  season effect on S0",   TRUE,  FALSE, FALSE, S - 1L,      "one per season, added to every country's logit S0; average zero",
     "dynamics",    "sigma  elderly suscept.",   FALSE, FALSE, TRUE,  1,           "one number for everyone",
+    "dynamics",    "kappa  children's S0",      FALSE, FALSE, TRUE,  1,           "one number: children start more susceptible, never less",
     "dynamics",    "I0  seed / arrival",        TRUE,  TRUE,  FALSE, d$n_cs,      "free for every wave: sets when it arrives",
     "observation", "c  reporting level",        FALSE, TRUE,  FALSE, C,           "one per surveillance system",
     "observation", "delta  season visibility",  TRUE,  FALSE, FALSE, S - 1L,      "one per season, the last set by the average-one constraint",
@@ -470,10 +475,10 @@ plot_jm_fit_country = function(fit, cc){
     facet_grid(group ~ season, scales = "free_y") +
     scale_colour_manual(values = .jm_gcol, guide = "none") +
     labs(title = paste0(cc, ": the three age groups, season by season"),
-         subtitle = paste("Points observed, lines the model. The age profile comes from the contact matrix, the one global",
-                          "elderly susceptibility and this country's two age reporting offsets. None of those varies by",
-                          "season, so every season-to-season change you see is produced by the shared season effect on S0,",
-                          "the shared season visibility and this wave's seed.", sep = "\n"),
+         subtitle = paste("Points observed, lines the model. The age profile comes from the contact matrix, the two global age",
+                          "factors (children's higher S0, the elderly's extra infection per contact) and this country's two age",
+                          "reporting offsets. None of those varies by season, so every season-to-season change you see is",
+                          "produced by the shared season effect on S0, the shared season visibility and this wave's seed.", sep = "\n"),
          x = "week of the season", y = "ILI+ per 100 000 of the age group") +
     .jm_theme(9) + theme(axis.text = element_text(size = 6.5))
 }
@@ -626,7 +631,8 @@ plot_jm_age_offsets = function(fit, iv = NULL){
          subtitle = paste0("Age reporting offsets relative to adults, one pair per country. Above one means that group generates",
                           "\nmore positive consultations per infection than an adult does: they consult more readily, or the",
                           "\nsentinel network sees them more. This is surveillance, not biology, which is exactly why it is allowed",
-                          "\nto differ by country while the elderly's susceptibility per contact is one number for all of Europe.",
+                          "\nto differ by country while the biology -- children's higher S0, the elderly's extra infection per",
+                          "\ncontact -- is one number each for all of Europe.",
                           .jm_ivnote(iv)),
          x = "reporting relative to adults (log scale)", y = NULL) + .jm_theme()
 }
@@ -651,13 +657,15 @@ plot_jm_attack = function(fit){
          subtitle = paste0("Modelled share of each age group infected over a full ", d$attack_weeks,
                           "-week season. Thin lines are countries, thick lines",
                           "\nthe median across them. READ THE PATTERN, NOT THE LEVEL. The pattern -- which seasons, countries and",
-                          "\nage groups had more infection -- comes from the fitted waves, the contact matrix, the elderly",
-                          "\nsusceptibility (", sprintf("%.2f", p$sigma_eld), "x an adult's) and vaccination. The absolute level is set by the R0 pin",
-                          sprintf(" (%g):", d$R0_fixed),
-                          sprintf("\nR0 and S0 are one number to the data, so at the same fit every attack rate scales as 1/R0 (median %.0f%%",
-                                  100 * med_all),
-                          sprintf("\nhere; it would read %.0f%% at a pin of 1.5 and %.0f%% at 3). Compare shapes with cohort evidence, not levels.",
-                                  100 * med_all * d$R0_fixed / 1.5, 100 * med_all * d$R0_fixed / 3)),
+                          "\nage groups had more infection -- comes from the fitted waves, the contact matrix, vaccination, children's",
+                          sprintf("\nhigher S0 (anchored on the PHIRST cohort: children infected %.2fx as often as adults here, about 1.7x there)",
+                                  median(f$attack[, 1] / f$attack[, 2])),
+                          sprintf("\nand the elderly's extra infection per contact (%.2fx an adult's, read as exposure the contact matrix misses).",
+                                  p$sigma_eld),
+                          sprintf("\nThe absolute level is set by the R0 pin (%g): R0 and S0 are one number to the data, so at the same fit",
+                                  d$R0_fixed),
+                          sprintf("\nevery attack rate scales as 1/R0 (median %.0f%% here; %.0f%% at a pin of 1.5, %.0f%% at 3). Compare shapes, not levels.",
+                                  100 * med_all, 100 * med_all * d$R0_fixed / 1.5, 100 * med_all * d$R0_fixed / 3)),
          x = NULL, y = "attack rate") +
     .jm_theme() + theme(axis.text.x = element_text(angle = 30, hjust = 1))
 }

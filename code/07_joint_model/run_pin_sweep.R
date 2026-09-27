@@ -23,10 +23,10 @@ cands = c("DK", "EE", "ES", "FR", "NO", "BE", "CZ", "IE", "IT", "PL", "HR", "NL"
 cores = max(1L, parallel::detectCores() - 1L)
 pins = c(1.5, 1.7, 2.0, 2.5, 3.0)
 fits = lapply(pins, function(r0){
-  f = file.path(out, sprintf("fit_R0_%.1f.rds", r0))
-  if (file.exists(f)) return(readRDS(f))
   s = modifyList(jm_settings(), list(R0_fixed = r0))
   d = jm_build_data(cands, models_in, demo, set = s, verbose = FALSE)
+  f = file.path(out, sprintf("fit_R0_%.1f.rds", r0))
+  if (file.exists(f)){ fit = readRDS(f); if (isTRUE(all.equal(fit$d, d))) return(fit) }   # same data and settings only
   fit = jm_fit(d, theta0 = jm_theta0(d, s), cores = cores, verbose = FALSE)
   saveRDS(fit, f); fit
 })

@@ -171,6 +171,7 @@ jm_truth_from_prior = function(d, set = jm_settings(), anchor = NULL){
   dev = rnorm(S, 0, set$pr_delta_sd); dev = dev - mean(dev)
   th[S - 1L + seq_len(S - 1)] = dev[seq_len(S - 1)]
   th[2L * S - 1L] = rnorm(1, set$pr_sigma_mean, set$pr_sigma_sd)
+  th[2L * S] = rnorm(1, set$pr_kappa_mean, set$pr_kappa_sd)
   for (ic in seq_len(d$n_country)){
     b = d$off_country[ic]
     th[b + 1] = rnorm(1, d$pr_S0_mean, d$pr_S0_sd)          # the prior the fit uses, set on R0 x S0
@@ -354,11 +355,12 @@ jm_recovery_summary = function(rec, d){
   fam = function(nm) ifelse(grepl("^x_", nm), "S0 season effect (shared)",
         ifelse(grepl("^delta_", nm), "season deviation (shared)",
         ifelse(grepl("^log2_sigma", nm), "elderly susceptibility (global)",
+        ifelse(grepl("log_kappa_young", nm), "children's S0 modifier (global)",
         ifelse(grepl(":logit_S0", nm), "S0 (country)",
         ifelse(grepl(":log_c$", nm), "reporting c (country)",
         ifelse(grepl(":off_", nm), "age reporting offset",
         ifelse(grepl(":log_phi", nm), "dispersion phi",
-        ifelse(grepl(":log_b_", nm), "baseline b", "seed I0 (country-season)"))))))))
+        ifelse(grepl(":log_b_", nm), "baseline b", "seed I0 (country-season)")))))))))
   cmp$family = fam(cmp$parameter)
   by_fam = cmp %>% group_by(family) %>%
     summarise(n = n(),

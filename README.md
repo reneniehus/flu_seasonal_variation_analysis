@@ -119,7 +119,7 @@ code/04_modelling/             build_slim_panel.R (write the committed panel via
 code/07_joint_model/           THE WORKING MODEL (branch flu_comp_model): all countries and seasons
                                fitted jointly. MODEL.md (START HERE: sections 1-7 the model as it
                                stands and what it learned, section 8 a guide to the figures,
-                               appendices A-K the dated investigations), joint_model.cpp (the entire
+                               appendices A-L the dated investigations), joint_model.cpp (the entire
                                log-posterior in C++), joint_model.R (data, packing, block-coordinate
                                fitting, the flat-line protector, identifiability and adequacy
                                diagnostics), joint_recovery.R (intervals; simulate-and-recover, the
@@ -128,7 +128,9 @@ code/07_joint_model/           THE WORKING MODEL (branch flu_comp_model): all co
                                figure set), run_joint_model.R, run_joint_recovery.R;
                                joint_compare.R (model comparison with the wave as the unit),
                                run_pin_sweep.R (what the R0 pin's value does), run_prior_stress.R
-                               (are the season results the data's or the priors'?). (The S0-vs-R0
+                               (are the season results the data's or the priors'?),
+                               run_kappa_profile.R (the children's S0 modifier: what the data say,
+                               and the calibration of its prior against PHIRST). (The S0-vs-R0
                                sensing comparison, figure 17, lives at commit 7b04681; the fitted
                                spatial-spread analysis, figure 18, at commit c9286b7.)
 code/06_comp_model/            the compartmental PILOT that preceded it, kept for its assumption

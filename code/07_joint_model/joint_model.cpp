@@ -20,6 +20,9 @@
 //   [S-1 .. 2S-3]      delta_s, s = 1..S-1           season effect on VISIBILITY, log scale, free values;
 //                                                    delta_S = -sum(free), i.e. they average zero
 //   [2S-2]             log2 sigma_eld                one global elderly susceptibility
+//   [2S-1]             log kappa                     CHILDREN'S S0 MODIFIER, one global value (2026-09-27):
+//                                                    logit S0_young = logit S0_{c,s} + kappa, kappa = exp(.) > 0,
+//                                                    so children start each season MORE susceptible, never less
 //   then per country c, starting at off_country[c]:
 //   +0                 logit S0_c   the country's susceptibility at the average season;
 //                                   logit S0_{c,s} = logit S0_c + x_s
@@ -90,12 +93,12 @@ static inline double spectral_radius3(const double M[A][A]){
 // the wave that started earlier are still running when a country's window closes, and their incidence
 // past the window (read from daily[]) enters its last observed weeks.
 static inline void simulate_season(int n_weeks, int n_weeks_dyn, const double Cs[A][A], double beta,
-                                   double S0, double I0, double gamma,
+                                   const double S0[A], double I0, double gamma,
                                    double ve_inf, double ve_ili, double ve_spread,
                                    int vax_day, double vax_eld,
                                    double* inc, double* attack, double* daily){
   double Su[A], Iu[A], Sv[A], Iv[A], acc[A];
-  for (int a = 0; a < A; ++a){ Su[a] = S0; Iu[a] = I0; Sv[a] = 0.0; Iv[a] = 0.0; }
+  for (int a = 0; a < A; ++a){ Su[a] = S0[a]; Iu[a] = I0; Sv[a] = 0.0; Iv[a] = 0.0; }
   const double vax[A] = {0.0, 0.0, vax_eld};      // only the 65+ group is vaccinated
   const double s_spread = 1.0 - ve_spread, e_inf = 1.0 - ve_inf, w_ili = 1.0 - ve_ili;
   const int D = 7 * n_weeks_dyn;                  // days in the dynamics horizon (daily[] is D x A)
@@ -137,7 +140,7 @@ static inline void simulate_season(int n_weeks, int n_weeks_dyn, const double Cs
     // only the observed weeks are recorded; the tail past n_weeks advances the state for attack[] only
     if (t < n_weeks) for (int a = 0; a < A; ++a) inc[t + a * n_weeks] = acc[a];
   }
-  for (int a = 0; a < A; ++a) attack[a] = S0 - Su[a] - Sv[a];
+  for (int a = 0; a < A; ++a) attack[a] = S0[a] - Su[a] - Sv[a];
 }
 
 // ---- |-spatial spread: the national weekly incidence of many time-shifted local epidemics ----
@@ -187,6 +190,9 @@ static inline void check_len(const NumericVector& theta, const List& d){
   // have: reading it would shift every country block by one, so refuse it instead
   if (!d.containsElementNamed("tau_fixed"))
     stop("this data object has no fixed spatial spread (tau_fixed); rebuild it with jm_build_data()");
+  // the children's S0 modifier added a shared slot (2026-09-27): an older object would misread every slot
+  if (!d.containsElementNamed("pr_kappa_mean"))
+    stop("this data object predates the children's S0 modifier (kappa); rebuild it with jm_build_data()");
   const double tau_fixed = as<double>(d["tau_fixed"]);
   if (!(tau_fixed >= 0.0 && tau_fixed <= 120.0)) stop("tau_fixed must be between 0 and 120 days");
   if (theta.size() != as<int>(d["n_par"]))
@@ -202,11 +208,13 @@ static inline double dnorm_log(double x, double m, double s){
 struct Shared {
   std::vector<double> xs, dev;                  // xs[s]: logit-scale season effect on S0;
   double sigma_eld;                             // dev[s] = exp(delta_s), the reporting multiplier
+  double kappa;                                 // children's logit-scale S0 modifier, > 0
 };
 // finiteness of the TRANSFORMED shared values. theta = 800 is a finite number whose exp() is Inf,
 // which then produced Inf*0 = NaN inside the dynamics, so checking theta alone is not enough.
 static inline bool shared_ok(const Shared& sh){
   if (!R_finite(sh.sigma_eld) || sh.sigma_eld <= 0.0) return false;
+  if (!R_finite(sh.kappa) || sh.kappa < 0.0) return false;
   for (size_t s = 0; s < sh.xs.size(); ++s)
     if (!R_finite(sh.xs[s]) || !R_finite(sh.dev[s]) || sh.dev[s] < 0.0) return false;
   return true;
@@ -220,6 +228,7 @@ static inline Shared read_shared(const double* th, int S){
   for (int s = 0; s < S - 1; ++s){ const double dd = th[S - 1 + s]; sh.dev[s] = std::exp(dd); sum_d += dd; }
   sh.dev[S - 1] = std::exp(-sum_d);             // the sum-to-zero constraint, on the log scale
   sh.sigma_eld = std::exp2(th[2 * S - 2]);
+  sh.kappa = std::exp(th[2 * S - 1]);
   return sh;
 }
 
@@ -303,7 +312,11 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
     const int nw = y.nrow();
     const int s  = cs_season[ics];
     // this country, this season: each quantity is its fixed anchor unless it carries an effect
-    const double S0 = 1.0 / (1.0 + std::exp(-(logit_S0_c + sh.xs[s])));
+    // S0 by age group: children start more susceptible (less prior immunity), adults and the elderly
+    // share the country-season value
+    const double logit_S0 = logit_S0_c + sh.xs[s];
+    const double S0 = 1.0 / (1.0 + std::exp(-logit_S0));
+    const double S0a[A] = {1.0 / (1.0 + std::exp(-(logit_S0 + sh.kappa))), S0, S0};
     const double I0 = std::exp(logI0[cs_pos[ics]]);
     const double b  = std::exp(logb[cs_src[ics]]);
     const double dev = sh.dev[s];
@@ -314,7 +327,7 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
     // only the nw observed weeks feed the likelihood (see simulate_season)
     const int nw_dyn = attack_weeks > nw ? attack_weeks : nw;
     if (spread) daily.assign((size_t)7 * nw_dyn * A, 0.0);
-    simulate_season(nw, nw_dyn, Cs, beta, S0, I0, gamma, ve_inf, ve_ili, ve_spread, vax_day, vax_eld[ics],
+    simulate_season(nw, nw_dyn, Cs, beta, S0a, I0, gamma, ve_inf, ve_ili, ve_spread, vax_day, vax_eld[ics],
                     inc.data(), attack, spread ? daily.data() : nullptr);
     // the country as a whole: the local wave spread over its cities. attack[] is untouched -- every
     // local copy has the same final size, so the spread moves infections in time, never in number
@@ -369,6 +382,7 @@ static double shared_lp(const double* th, const List& d, int S){
   for (int s = 0; s < S - 1; ++s){ lp += dnorm_log(th[S - 1 + s], 0.0, s_dev); sum_d += th[S - 1 + s]; }
   lp += dnorm_log(-sum_d, 0.0, s_dev);
   lp += dnorm_log(th[2 * S - 2], as<double>(d["pr_sigma_mean"]), as<double>(d["pr_sigma_sd"]));
+  lp += dnorm_log(th[2 * S - 1], as<double>(d["pr_kappa_mean"]), as<double>(d["pr_kappa_sd"]));  // log kappa
   return lp;
 }
 
@@ -487,5 +501,5 @@ List jm_fitted_cpp(NumericVector theta, List d){
   NumericVector xs(S), dev(S);
   for (int s = 0; s < S; ++s){ xs[s] = sh.xs[s]; dev[s] = sh.dev[s]; }
   return List::create(_["mu"] = mu_all, _["attack"] = attack_all,
-                      _["x"] = xs, _["dev"] = dev, _["sigma_eld"] = sh.sigma_eld);
+                      _["x"] = xs, _["dev"] = dev, _["sigma_eld"] = sh.sigma_eld, _["kappa"] = sh.kappa);
 }

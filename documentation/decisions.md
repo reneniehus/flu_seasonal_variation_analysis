@@ -1111,3 +1111,79 @@ back 0.044 logit low, the seed prior pulling on its very small seeds.
 **The documentation.** MODEL.md is rebuilt for reading: sections 1-7 are the current model and what
 it learned, each number from the R0 = 2.0 fit, section 8 a guide to the figures, and the
 investigations that shaped the design follow as dated appendices A-K.
+
+## 2026-09-27 -- children start each season more susceptible: a global S0 modifier anchored on cohort evidence; the elderly factor re-read as exposure
+
+**The owner's questions, discussed first.** Would expert knowledge say that children and the elderly
+both start a season more susceptible than adults? And does PHIRST or other work show that an older
+immune system raises the risk of infection, or only of severe outcomes?
+
+**Answer, from the literature (MODEL.md, appendix L).** Children: yes. Cohorts that test everyone find
+them infected most (PHIRST about 1.7 times adults; Tecumseh), household studies find them more
+susceptible, and the mechanism is prior immunity accumulating with age. The elderly: severity, not
+infection. About 90% of influenza deaths are in the 65+ and their vaccine response is weaker, but the
+same cohorts find them infected no more often than adults (PHIRST 0.80; Tecumseh least of all ages),
+and they carry cross-reactive immunity (in 2009, a third of the over-60s had antibodies to the new
+pandemic H1N1). The exception is subtype, through imprinting: people born before 1968 are at higher
+risk from H3N2 -- a candidate driver for the learning layer, not a constant.
+
+**Owner decision.** Implement a children's modifier to `S0`: global, because it is biology; able only to
+raise children's susceptibility; informed by the model, the data and real-world evidence.
+
+**What changed in the code.** `logit S0_young = logit S0_{c,s} + kappa`, `kappa = exp(log kappa)`, one
+shared slot at position 2S (182 parameters, 16 shared). It is in the C++, the base-R reference, the
+recovery study's prior draw, the design and mechanism figures, and the summaries (`S0_young`,
+`S0_typical_young`). The tests cover the layout, the prior's sum and curvature and the read-back, and
+a new test checks that the modifier only raises children's `S0` and vanishes as `kappa` goes to zero.
+The test cache guard refuses a fit from before the modifier.
+
+`kappa` -> 0 reproduces the engine of `da3a80e`: the log-likelihood to 6.5e-9 nats and the fitted means
+to 7e-13; the C++ agrees with R to 1e-10. The new `run_kappa_profile.R` holds the profile and the
+calibration. It and `run_pin_sweep.R` now reuse a cached fit only if it was fitted to the same data and
+settings. The sweep's cached fits predate the modifier and would otherwise have been read with the
+wrong layout.
+
+**What the data say.** The profile peaks at `kappa` = 0. As `kappa` rises, the children's reporting
+offset falls in step: the level of children's counts is held and only its attribution moves. The
+shape signal that could separate the two, children's waves leading and steepening, is weak. This is
+the verdict the per-contact test gave on 2026-09-11, now for initial immunity, the candidate that entry
+left open.
+
+At `kappa` = 1 the cost is 13.0 raw nats, but it is not evidence with the wave as the unit: 37 of 85
+waves favour the modifier, sign test p 0.28, and every bootstrap interval spans zero. The cost falls on
+two countries: Ireland -11.5 and Croatia -4.6; the other ten together gain +2.9. Only `kappa` = 3, a
+ratio of 2.2, is rejected, and only marginally (Wilcoxon p 0.04).
+
+**Decision on the prior: the cohort evidence decides, since the data cannot.** The prior is
+`log kappa ~ N(log 1.6, 0.2)`. Its centre is where the refitted model reproduces PHIRST's ratio of 1.7
+(1.59 by interpolation), and it is calibrated at R0 = 2.0. `kappa` acts on the logit scale, so another
+pin needs another centre.
+
+The fit gives `kappa` = 1.02 (0.76-1.37), with contraction 0.25, by design. Children are infected 1.44
+times as often as adults (PHIRST 1.7) and the elderly 0.69 times (PHIRST 0.80).
+
+**What moved.**
+- Children's attack rate rose from 25% to 35% and adults' fell from 26% to 23%.
+- The children's reporting offset fell from 1.95 to 1.25.
+- The country `S0` ranking correlates 0.90 with the previous one; Ireland moves to last.
+- The correlation of `S0` with data quality fell from 0.75 to 0.52.
+
+**What did not move.**
+- The reproduction number at season start stays at 1.29: the data fix how fast the epidemic grows, and
+  the modifier only moves who carries it.
+- The season effects and visibility correlate 0.999 with the previous fit.
+
+**The elderly factor, re-read.** `sigma_eld` (2.2 per contact) is kept, because it brings the
+elderly-to-adult infection ratio near PHIRST's. It is read as exposure the contact matrices miss, not
+as susceptibility to infection.
+
+**The check.** The refit converged with no flat country and a positive-definite penalised Hessian. The
+full suite gives 1038 passed and 0 failed (1 skipped, as before). Three figure captions (07, 13 and 14)
+had called the elderly factor susceptibility and left out the children's modifier; they are corrected.
+
+**Open for the owner.**
+- A European anchor in place of PHIRST, such as Flu Watch in England, if its age-specific infection
+  rates can be extracted.
+- If PHIRST should be matched exactly: fixing `kappa` at 1.6 costs about 7 more raw nats than the fit
+  (about 20 against none), which is not significant with the wave as the unit.
+- Imprinting by subtype as a driver.
