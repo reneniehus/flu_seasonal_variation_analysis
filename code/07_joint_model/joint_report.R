@@ -23,8 +23,10 @@ suppressMessages({library(ggplot2); library(dplyr); library(tidyr)})
           panel.grid.minor = element_blank(), legend.position = "top")
 }
 .jm_grp  = c("young", "medium", "elderly")
-.jm_gcol = c(young = "#1B7F5C", medium = "#2B5D8A", elderly = "#C1541E")
-.jm_blue = "#2B5D8A"; .jm_orange = "#C1541E"; .jm_green = "#1B7F5C"
+# a categorical palette checked for colour-vision deficiency (all pairs: CVD Delta E >= 9, normal vision
+# >= 24); the aqua is light on white, so every figure using it also carries a legend or labels
+.jm_gcol = c(young = "#1baf7a", medium = "#2a78d6", elderly = "#eb6834")
+.jm_blue = "#2a78d6"; .jm_orange = "#eb6834"; .jm_green = "#1baf7a"
 # pull the interval rows for a set of parameter names, in that order
 .jm_iv = function(iv, names_wanted){
   if (is.null(iv)) return(NULL)
@@ -97,7 +99,7 @@ plot_jm_data_panel = function(fit){
                                  excluded = "#F2C9C9", `no data` = "grey93"),
                       na.value = "grey93", name = NULL,
                       breaks = c("ERVISS", "RespiCompass", "excluded", "no data"),
-                      labels = c("ERVISS", "RespiCompass", "excluded (see below)", "no data")) +
+                      labels = c("ERVISS", "RespiCompass", "excluded", "no data")) +
     labs(title = "The panel: 85 country-seasons of weekly influenza-positive ILI",
          subtitle = paste("One tile per country and season; the number is how many weeks carry an observation, and the",
                           "colour which surveillance source that season came from. Blank means the country reported",
@@ -330,7 +332,7 @@ plot_jm_mechanism = function(fit, ref = NULL){
   # pin the facet order to what the caption says: facet_wrap would otherwise sort alphabetically
   # and put "c x delta" on the LEFT, silently contradicting the text
   tr$pair = factor(tr$pair, levels = c("same peak: susceptibility vs visibility", fat, "c x delta held constant"))
-  cols = c("grey30", .jm_blue, .jm_orange, "#5E8C31", "#8E5BA8", "#C1541E"); names(cols) = levels(tr$set)
+  cols = c("grey30", .jm_blue, .jm_orange, .jm_green, "#4a3aa7", .jm_orange); names(cols) = levels(tr$set)
   ltys = c("solid", "solid", "solid", "solid", "solid", "22"); names(ltys) = levels(tr$set)
   ptr = ggplot(tr %>% filter(value > 0.5), aes(week, value, colour = set, linetype = set)) +
     geom_line(linewidth = 1.1) +

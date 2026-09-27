@@ -1261,3 +1261,26 @@ working fit and the nearest value already profiled), keeps the better, and print
   the previous single replicate).
 - Figure 16 no longer caps a single-truth panel at the edge. The modifier's offset from its truth is
   the finding, not a failure, and every panel now keeps its diagonal in view.
+
+## 2026-09-27 (close) -- the project parked; a printable report
+
+**Owner decision.** The project is parked here. Its state is summarised in one printable A4 report,
+`documentation/joint_model_report.pdf` (16 pages). The report covers the data, the evidence from
+studies, the model and how to read its parameters, what informs each parameter, what the model learned,
+how well it fits and where it does not, and how far to trust it.
+
+The source lives in `code/07_joint_model/report/`:
+- `report_figures.R` redraws the figures for print from the saved fit.
+- `REPORT.md` is the text.
+- `build_report.sh` runs pandoc, then headless Chromium, to produce the PDF.
+
+The numbers are those of the working fit of 2026-09-27: 181 parameters, no elderly factor, and a
+children's prior centred on 1.5.
+
+**One figure is new:** what informs the children's modifier. It sets the surveillance data's profile
+against the cohort's infection ratio.
+
+**The figure palette changed.** The age-group colours failed a colour-vision check: blue and green sat
+only Delta E 14.7 apart, below the floor of 15, and the blue read as grey. They are now a checked
+palette (aqua, blue, orange: all pairs Delta E >= 9 under colour-vision deficiency, and >= 24 in normal
+vision). The aqua is light on white, so every figure that uses it also carries a legend.

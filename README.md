@@ -130,7 +130,9 @@ code/07_joint_model/           THE WORKING MODEL (branch flu_comp_model): all co
                                run_pin_sweep.R (what the R0 pin's value does), run_prior_stress.R
                                (are the season results the data's or the priors'?),
                                run_kappa_profile.R (the children's S0 modifier: what the data say,
-                               and the calibration of its prior against PHIRST). (The S0-vs-R0
+                               and the calibration of its prior against PHIRST); report/ (the
+                               printable report: report_figures.R, REPORT.md, build_report.sh ->
+                               documentation/joint_model_report.pdf). (The S0-vs-R0
                                sensing comparison, figure 17, lives at commit 7b04681; the fitted
                                spatial-spread analysis, figure 18, at commit c9286b7.)
 code/06_comp_model/            the compartmental PILOT that preceded it, kept for its assumption
@@ -168,6 +170,7 @@ Where each kind of information lives:
 | `documentation/quickstart.md` | how to set up and run |
 | `documentation/data_overview.md` | what data is present (`data`, `models_in`, indicators) |
 | `documentation/documentation.Rmd` | the model maths / science (SIR, inference, contact matrix) |
+| `documentation/joint_model_report.pdf` | **the printable status report** of the joint model (A4, 16 pages): data, evidence, model, behaviour and fit, with every figure; built by `code/07_joint_model/report/` |
 | `code/07_joint_model/MODEL.md` | the WORKING model: its abstract, what varies where, what was cut and why, and whether it recovers a known truth |
 | `documentation/decisions.md` | **why** — rationale for key modelling / method / data decisions |
 | `documentation/to_confirm_with_surveillance.md` | **what we inferred rather than know** — open questions about what the source data MEAN, for surveillance colleagues, with what changes under each answer |

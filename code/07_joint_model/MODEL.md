@@ -7,7 +7,8 @@ susceptibility factor for the elderly, 181 parameters, fitted 2026-09-27 -- and 
 appendices are the evidence trail: the investigations that shaped the design, each dated, with its
 numbers as measured at the time. `documentation/decisions.md` records every decision in order, and
 `documentation/to_confirm_with_surveillance.md` the six things we have inferred about the source data
-rather than confirmed.
+rather than confirmed. For reading on paper, `documentation/joint_model_report.pdf` tells the same
+story in 16 pages (built by `code/07_joint_model/report/`).
 
 > ## ⚠ ONE OPEN QUESTION ABOUT THE SOURCE DATA — it affects what the model is fitted to
 >
