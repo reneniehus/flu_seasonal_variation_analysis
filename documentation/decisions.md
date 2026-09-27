@@ -1187,3 +1187,64 @@ had called the elderly factor susceptibility and left out the children's modifie
 - If PHIRST should be matched exactly: fixing `kappa` at 1.6 costs about 7 more raw nats than the fit
   (about 20 against none), which is not significant with the wave as the unit.
 - Imprinting by subtype as a driver.
+
+## 2026-09-27 (later) -- the elderly susceptibility factor removed; the children's prior recalibrated
+
+**Owner decision.** Keep the children's modifier, and remove `sigma_eld`, the elderly's extra infection
+per contact. The literature finds the elderly no more infected than adults -- ageing raises severity,
+not infection -- and parsimony argues for one parameter fewer.
+
+**What changed in the code.** The slot, its prior, and the per-evaluation re-weighting and
+renormalisation of the contact matrix are gone: 181 parameters, 15 shared. The C++ now uses each
+matrix as built, `jm_build_data` checks that its spectral radius is 1, and the power iteration went
+with the re-weighting. A data object from before the removal is refused. The recovery study, the
+report and the tests follow. The design figure lost a row, captions 07, 13 and 14 were rewritten, and
+figure 16 now shows the children's modifier in the elderly factor's place.
+
+Checked:
+- With the factor at 1, the new engine reproduces the old one to 1.2e-8 nats and the fitted means to
+  1e-13. The posteriors differ by exactly the removed prior term.
+- C++ agrees with R to 1e-10 relative.
+- The refit reaches the same optimum from a cold start and from the old fit (0.000 nats).
+
+**What the removal cost, measured.** The fit is 10.9 raw nats worse. That is small, but with the wave
+as the unit it is evidence:
+- 58 of 85 waves fit better with the factor (sign test p 0.001, Wilcoxon p 0.0001).
+- Every bootstrap interval excludes zero: waves -17 to -5, countries -16 to -6, seasons -19 to -3.
+- 11 of 12 countries lean the same way.
+- Half the cost is in the elderly's counts and half in the children's.
+
+**What moved.**
+- The elderly's attack rate fell from 16% to 6.5%: 0.69 to 0.29 times adults, against 0.80 in PHIRST.
+- Their counts are now matched by visibility. The elderly reporting offset rose from 0.78 to 1.83 times
+  adults (median; the Netherlands 8.6).
+- Nothing the learning layer uses moved: the season effects, visibility and the country `S0` ranking
+  correlate 1.000 with the fit that had the factor.
+
+**Reading.** The factor could never be susceptibility; at most it was exposure the contact matrices
+miss, such as care homes and grandparenting. It moved the elderly's excess of cases between infection
+and visibility:
+- With it, the elderly were infected 0.69 times as often as adults and seen 0.78 times as readily.
+  This matches the cohort's infection ratio.
+- Without it, 0.29 and 1.8 times. This matches the severity literature, since a sicker patient is
+  likelier to see a doctor.
+
+PHIRST's elderly live in multigenerational households, so the European ratio is not known well enough
+to fix a correction. The removal trades a small, consistent loss of fit for one parameter fewer and
+nothing to reinterpret. If the elderly's attack rate ever becomes a target, the correction belongs on
+contacts, not susceptibility.
+
+**The children's prior, recalibrated.** Without the elderly factor, the refitted model reproduces
+PHIRST's children-to-adult ratio of 1.7 at `kappa` = 1.49, against 1.59 before, so the prior centre
+moves from 1.6 to 1.5. The fit gives `kappa` = 0.94 (0.70-1.28), children infected 1.42 times adults,
+and contraction 0.23.
+
+The profile is otherwise as before: its maximum is at none, and at `kappa` = 1 the cost is 15.4 raw
+nats but not evidence wave by wave (36 of 85 waves favour it, p 0.19). The cost falls on Ireland and
+Croatia.
+
+**A defect found in the profile runner.** Started from the working fit alone, the fit at `kappa` = 0
+stuck 45 nats worse: Italy 2024/2025, its only ERVISS season, moved its wave early and let that source's
+baseline absorb the counts. The flat-line protector does not look for this mode, and every
+"against none" comparison inherited it. `run_kappa_profile.R` now fits each value from two starts (the
+working fit and the nearest value already profiled), keeps the better, and prints any disagreement.

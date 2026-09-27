@@ -19,10 +19,13 @@
 //                                                    free values; x_S = -sum(free), so they average zero
 //   [S-1 .. 2S-3]      delta_s, s = 1..S-1           season effect on VISIBILITY, log scale, free values;
 //                                                    delta_S = -sum(free), i.e. they average zero
-//   [2S-2]             log2 sigma_eld                one global elderly susceptibility
-//   [2S-1]             log kappa                     CHILDREN'S S0 MODIFIER, one global value (2026-09-27):
+//   [2S-2]             log kappa                     CHILDREN'S S0 MODIFIER, one global value (2026-09-27):
 //                                                    logit S0_young = logit S0_{c,s} + kappa, kappa = exp(.) > 0,
-//                                                    so children start each season MORE susceptible, never less
+//                                                    so children start each season MORE susceptible, never less.
+//                                                    There is NO elderly susceptibility factor (removed 2026-09-27:
+//                                                    cohorts find the elderly no more infected than adults, and
+//                                                    parsimony), so infection per contact is the same at every age
+//                                                    and the contact matrix is used as given (spectral radius 1)
 //   then per country c, starting at off_country[c]:
 //   +0                 logit S0_c   the country's susceptibility at the average season;
 //                                   logit S0_{c,s} = logit S0_c + x_s
@@ -57,25 +60,6 @@ using namespace Rcpp;
 
 static const int A = 3;                       // young, medium, elderly -- fixed, so all A-loops unroll
 static const double LOG_2PI = 1.8378770664093453;
-
-// ---- |-dominant eigenvalue of a 3x3 positive matrix by power iteration ----
-// The contact matrix is rescaled to spectral radius 1 so that the realised R0 equals the pinned R0
-// exactly (MODEL.md). Scaling its rows by the age susceptibilities changes that radius, and sigma_eld is
-// fitted, so the radius has to be recomputed every evaluation. Power iteration on 3x3 costs nothing
-// and avoids a dependency on an eigen solver.
-static inline double spectral_radius3(const double M[A][A]){
-  double v[A] = {1.0, 1.0, 1.0}, lam = 0.0;
-  for (int it = 0; it < 400; ++it){
-    double w[A];
-    for (int a = 0; a < A; ++a){ w[a] = 0.0; for (int j = 0; j < A; ++j) w[a] += M[a][j] * v[j]; }
-    double nrm = std::sqrt(w[0]*w[0] + w[1]*w[1] + w[2]*w[2]);
-    if (!(nrm > 0.0)) return 0.0;
-    for (int a = 0; a < A; ++a) v[a] = w[a] / nrm;
-    if (it > 3 && std::fabs(nrm - lam) < 1e-15 * (nrm > 1.0 ? nrm : 1.0)){ return nrm; }
-    lam = nrm;
-  }
-  return lam;
-}
 
 // ---- |-one country-season: weekly observation-relevant incidence as a fraction of each age group ----
 // inc is n_weeks x A in COLUMN-MAJOR order, matching an R matrix, so it can be handed straight back.
@@ -190,9 +174,12 @@ static inline void check_len(const NumericVector& theta, const List& d){
   // have: reading it would shift every country block by one, so refuse it instead
   if (!d.containsElementNamed("tau_fixed"))
     stop("this data object has no fixed spatial spread (tau_fixed); rebuild it with jm_build_data()");
-  // the children's S0 modifier added a shared slot (2026-09-27): an older object would misread every slot
+  // the children's S0 modifier added a shared slot and the elderly factor's slot went (2026-09-27): an
+  // object from either side of those changes would misread every slot after them
   if (!d.containsElementNamed("pr_kappa_mean"))
     stop("this data object predates the children's S0 modifier (kappa); rebuild it with jm_build_data()");
+  if (d.containsElementNamed("pr_sigma_mean"))
+    stop("this data object predates the removal of the elderly susceptibility factor; rebuild it with jm_build_data()");
   const double tau_fixed = as<double>(d["tau_fixed"]);
   if (!(tau_fixed >= 0.0 && tau_fixed <= 120.0)) stop("tau_fixed must be between 0 and 120 days");
   if (theta.size() != as<int>(d["n_par"]))
@@ -204,16 +191,15 @@ static inline double dnorm_log(double x, double m, double s){
   return -0.5 * z * z - std::log(s) - 0.5 * LOG_2PI;
 }
 
-// ---- |-the shared block: the two season effects and the global elderly susceptibility ----
+// ---- |-the shared block: the two season effects and the children's S0 modifier ----
 struct Shared {
   std::vector<double> xs, dev;                  // xs[s]: logit-scale season effect on S0;
-  double sigma_eld;                             // dev[s] = exp(delta_s), the reporting multiplier
+                                                // dev[s] = exp(delta_s), the reporting multiplier
   double kappa;                                 // children's logit-scale S0 modifier, > 0
 };
 // finiteness of the TRANSFORMED shared values. theta = 800 is a finite number whose exp() is Inf,
 // which then produced Inf*0 = NaN inside the dynamics, so checking theta alone is not enough.
 static inline bool shared_ok(const Shared& sh){
-  if (!R_finite(sh.sigma_eld) || sh.sigma_eld <= 0.0) return false;
   if (!R_finite(sh.kappa) || sh.kappa < 0.0) return false;
   for (size_t s = 0; s < sh.xs.size(); ++s)
     if (!R_finite(sh.xs[s]) || !R_finite(sh.dev[s]) || sh.dev[s] < 0.0) return false;
@@ -227,8 +213,7 @@ static inline Shared read_shared(const double* th, int S){
   sh.xs[S - 1] = -sum_x;                        // the sum-to-zero constraint, on the logit scale
   for (int s = 0; s < S - 1; ++s){ const double dd = th[S - 1 + s]; sh.dev[s] = std::exp(dd); sum_d += dd; }
   sh.dev[S - 1] = std::exp(-sum_d);             // the sum-to-zero constraint, on the log scale
-  sh.sigma_eld = std::exp2(th[2 * S - 2]);
-  sh.kappa = std::exp(th[2 * S - 1]);
+  sh.kappa = std::exp(th[2 * S - 2]);
   return sh;
 }
 
@@ -276,17 +261,10 @@ static double country_lp(const double* th, const List& d, int ic, const Shared& 
   double c_age[A];
   c_age[0] = c_c * std::exp2(oy);  c_age[1] = c_c;  c_age[2] = c_c * std::exp2(oe);
 
-  // the contact matrix with the age susceptibilities, renormalised so R0 keeps its meaning
+  // the contact matrix as given: jm_build_data checks its spectral radius is 1, so the realised R0 at
+  // full susceptibility is the pinned R0 in every country
   double Cs[A][A];
-  const double sig[A] = {1.0, 1.0, sh.sigma_eld};
-  for (int a = 0; a < A; ++a) for (int j = 0; j < A; ++j) Cs[a][j] = sig[a] * Cn(a, j);
-  const double rho = spectral_radius3(Cs);
-  if (!(rho > 0.0) || !R_finite(rho)){
-    // write an empty result first: the want_fit caller indexes fit_out unconditionally
-    if (want_fit) *fit_out = List::create(_["mu"] = List(0), _["attack"] = NumericMatrix(0, A));
-    return R_NegInf;
-  }
-  for (int a = 0; a < A; ++a) for (int j = 0; j < A; ++j) Cs[a][j] /= rho;
+  for (int a = 0; a < A; ++a) for (int j = 0; j < A; ++j) Cs[a][j] = Cn(a, j);
 
   // THE PHI HOLE. lgamma(y + phi) - lgamma(phi) is a difference of two numbers of size phi*log(phi):
   // past phi ~ 1e8 it loses digits, and past ~1e15 it is pure cancellation noise that can come out
@@ -381,8 +359,7 @@ static double shared_lp(const double* th, const List& d, int S){
   lp += dnorm_log(-sum_x, 0.0, s_x);
   for (int s = 0; s < S - 1; ++s){ lp += dnorm_log(th[S - 1 + s], 0.0, s_dev); sum_d += th[S - 1 + s]; }
   lp += dnorm_log(-sum_d, 0.0, s_dev);
-  lp += dnorm_log(th[2 * S - 2], as<double>(d["pr_sigma_mean"]), as<double>(d["pr_sigma_sd"]));
-  lp += dnorm_log(th[2 * S - 1], as<double>(d["pr_kappa_mean"]), as<double>(d["pr_kappa_sd"]));  // log kappa
+  lp += dnorm_log(th[2 * S - 2], as<double>(d["pr_kappa_mean"]), as<double>(d["pr_kappa_sd"]));  // log kappa
   return lp;
 }
 
@@ -480,7 +457,7 @@ List jm_fitted_cpp(NumericVector theta, List d){
   const Shared sh = read_shared(th, S);
   if (!shared_ok(sh))
     stop("cannot compute fitted values: the shared block is not usable (a season effect or the "
-         "elderly susceptibility is non-finite or negative)");
+         "children's S0 modifier is non-finite or negative)");
   const List cs_of_country = d["cs_of_country"];
   const int n_cs = as<int>(d["n_cs"]);
   List mu_all(n_cs); NumericMatrix attack_all(n_cs, A);
@@ -501,5 +478,5 @@ List jm_fitted_cpp(NumericVector theta, List d){
   NumericVector xs(S), dev(S);
   for (int s = 0; s < S; ++s){ xs[s] = sh.xs[s]; dev[s] = sh.dev[s]; }
   return List::create(_["mu"] = mu_all, _["attack"] = attack_all,
-                      _["x"] = xs, _["dev"] = dev, _["sigma_eld"] = sh.sigma_eld, _["kappa"] = sh.kappa);
+                      _["x"] = xs, _["dev"] = dev, _["kappa"] = sh.kappa);
 }

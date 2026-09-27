@@ -1,8 +1,8 @@
 # The joint EU/EEA influenza model
 
 **How to read this file.** Sections 1-7 describe the model as it stands -- R0 pinned at 2.0, spatial
-spread fixed at none, children's susceptibility raised by a modifier anchored on cohort evidence, 182
-parameters, fitted 2026-09-27 -- and what it has learned, with every number taken from that fit
+spread fixed at none, children's susceptibility raised by a modifier anchored on cohort evidence, no
+susceptibility factor for the elderly, 181 parameters, fitted 2026-09-27 -- and what it has learned, with every number taken from that fit
 (`output/joint_model/joint_fit.rds`). Section 8 is a guide to the figures. The
 appendices are the evidence trail: the investigations that shaped the design, each dated, with its
 numbers as measured at the time. `documentation/decisions.md` records every decision in order, and
@@ -25,7 +25,7 @@ rather than confirmed.
 > because CZ's detections feed went dark on 2025-03-26). **PL 2024/2025 is kept**: its single affected
 > week sits among neighbours with 0 detections over 114 tests, so it is almost certainly a real zero.
 >
-> The design is therefore **12 countries, 8 seasons, 85 country-seasons, 182 parameters**. All 12
+> The design is therefore **12 countries, 8 seasons, 85 country-seasons, 181 parameters**. All 12
 > countries and all 8 seasons survive. CZ also loses its ERVISS baseline slot, because 2024/2025 was
 > its only ERVISS season — the right outcome, since that slot was otherwise fitted with no off-season
 > behind it.
@@ -40,7 +40,7 @@ rather than confirmed.
 
 We fit weekly influenza-positive ILI consultations (ILI+) from **twelve EU/EEA countries over eight
 seasons -- 85 country-seasons, 8 685 observed age-week cells -- with one age- and
-vaccination-structured SIR per country-season, estimated jointly in 182 parameters.** The model is
+vaccination-structured SIR per country-season, estimated jointly in 181 parameters.** The model is
 best read as a **structured sensor of wave shape**. It turns each country's weekly curves into two
 things: how easily influenza spread, a susceptibility-like index `S0` that varies by country and by
 season, and how visible that spread was, a reporting level that varies by country and by season. The
@@ -61,7 +61,7 @@ SIR ties each wave's rise, peak and decline to one number, which is what lets th
 
 - **R0 = 2.0.** R0 and `S0` are exactly one number to the data: multiplying R0 by any factor while
   dividing `S0` and the seed by it and multiplying reporting by it reproduces every expected count. The data fix the
-  product -- a reproduction number at season start of 1.29 in the median country-season, where the
+  product -- a reproduction number at season start of 1.28 in the median country-season, where the
   literature puts that of seasonal influenza -- and the pin chooses only how it splits. Its value sets the absolute scale of
   infections (attack rates scale as 1/R0) and no relative result; 2.0 keeps every `S0` well below its
   ceiling of 1.
@@ -74,7 +74,9 @@ least immunity from past seasons, and cohorts that test everyone find them infec
 often as adults (PHIRST). One global modifier raises children's `S0` on the logit scale and can only
 raise it. The surveillance data cannot tell children's susceptibility from how readily children are
 seen, so the modifier's prior is anchored on the cohort evidence and the data pull it partway back:
-children's `S0` is 0.81 against 0.60 for adults, and they are infected 1.44 times as often.
+children's `S0` is 0.79 against 0.59 for adults, and they are infected 1.42 times as often. The elderly
+get no factor of their own: the same cohorts find them infected no more often than adults -- ageing
+raises severity, not infection -- so per contact they are as susceptible as adults.
 
 So **`S0` is a blunt sensor**: susceptibility, infectivity (a more transmissible strain, denser mixing,
 an older population) and the overlay of a country's local waves all land in it. Read `S0_c` and the
@@ -83,38 +85,41 @@ season effects as "how easily influenza spread here" and "this season", never as
 **What it learned** (figures 09-14):
 
 - **Seasons differ little in how easily they spread and a lot in how visible they were.** A typical
-  country's adult R0 x `S0` was 1.14 in 2015/2016, the lowest, and 1.31 in 2025/2026, the highest; the
-  other six seasons lie between 1.18 and 1.21, closer than the data can order. Visibility per infection ran
-  from 0.58 times normal (2023/2024, 2025/2026) to 1.84 (2017/2018), about ten times the spread of the
+  country's adult R0 x `S0` was 1.12 in 2015/2016, the lowest, and 1.30 in 2025/2026, the highest; the
+  other six seasons lie between 1.17 and 1.20, closer than the data can order. Visibility per infection ran
+  from 0.57 times normal (2025/2026; 0.58 in 2023/2024) to 1.84 (2017/2018), about ten times the spread of the
   susceptibility effect on a common log scale. The two move against each other (correlation -0.61):
   the seasons that spread most easily turned the fewest infections into consultations.
-- **Countries.** Croatia's waves spread most easily (adult R0 x `S0` 1.42), Ireland's and Estonia's
+- **Countries.** Croatia's waves spread most easily (adult R0 x `S0` 1.40), Ireland's and Estonia's
   least (1.11, 1.13). The ranking is sharp -- intervals of about +/-0.01 to 0.03 on `S0` -- but it
   assumes equal transmissibility and equal spatial structure across countries, which is exactly what
   the pins impose.
 - **Reporting.** The share of adult infections that becomes an ILI+ consultation differs about
   twentyfold between countries, Italy and Poland highest, Croatia and Ireland lowest. A child is seen
-  about 1.25 times as readily as an adult per infection -- most of children's excess cases are now
-  more infection, not more reporting -- and an elderly person slightly less.
-- **Who gets infected.** Children most (35% in the median country-season), adults 23%, the elderly
-  16%: children 1.44 times adults, the elderly 0.69 times, against 1.7 and 0.8 in PHIRST. The elderly
-  factor of 2.2 per contact is best read as exposure the contact matrices miss, not as higher
-  susceptibility to infection (section 3). The absolute level, 23% overall, is the pin's choice; the
-  pattern is the data's and the cohorts'.
+  about 1.24 times as readily as an adult per infection -- most of children's excess cases are more
+  infection, not more reporting -- and an elderly person about 1.8 times: the elderly's excess cases
+  are visibility, which fits their more severe illness.
+- **Who gets infected.** Children most (34% in the median country-season), adults 22%, the elderly
+  6.5%: children 1.42 times adults, the elderly 0.29 times, against 1.7 and 0.8 in PHIRST. With no
+  elderly factor the contact matrices alone set the elderly's share, well below the cohort's -- whose
+  elderly live in multigenerational South African households -- and the data would raise it slightly
+  (section 6). The absolute level, 20% overall, is the pin's choice; the pattern is the data's and the
+  cohorts'.
 
 **How far to trust it** (sections 5 and 6). Every parameter family is determined by the data rather
-than its prior (contraction 0.70-0.97), except the children's modifier, which is anchored on outside
-evidence by design (0.25). The two questions the design must answer from shape alone --
+than its prior (contraction 0.78-0.97), except the children's modifier, which is anchored on outside
+evidence by design (0.23). The two questions the design must answer from shape alone --
 *a bigger season: more susceptible or more visible?* and *a big country: more infections or more
-seen?* -- are answered: the posterior correlations are 0.28 and 0.11. On data simulated from the model onto the real design and refitted
-from scratch (run 2026-09-26, before the children's modifier), the country ranking of `S0` comes back
+seen?* -- are answered: the posterior correlations are 0.23 and 0.10. On data simulated from the model onto the real design and refitted
+from scratch (run 2026-09-26, before the age changes of 2026-09-27), the country ranking of `S0` comes back
 at 0.97, the season effects at 0.98 and visibility at 1.00, the intervals cover 97% of the time, and a
 known driver effect on the season parameters is recovered without bias. Three
 limits are measured, not assumed: the deterministic curve needs 2.6 times more noise than the data's
 own week-to-week scatter, so part of what it calls measurement error is misfit; the country ranking of
 `S0` does not survive real transmissibility differences between countries (it falls to 0.07 on
-simulated data where they differ by 10%); and how much more susceptible children are rests on the
-cohort evidence, not on these data. One pattern is unexplained: the country ranking of `S0` follows
+simulated data where they differ by 10%); how much more susceptible children are rests on the
+cohort evidence, not on these data; and without an elderly factor the contact matrices set the
+elderly's share of infection, which the data would raise slightly (10.9 nats; 58 of 85 waves). One pattern is unexplained: the country ranking of `S0` follows
 data quality (rank correlation 0.52 with the dispersion; 0.75 before the children's modifier), and
 recovery shows the estimator does not produce it.
 
@@ -148,9 +153,9 @@ recovery shows the estimator does not produce it.
 **Dynamics.** Each country-season is an independent epidemic: three age groups x vaccinated or not,
 SIR, integrated on a daily grid (forward Euler) from a seed on 1 August to a fixed 53-week horizon,
 with one vaccination pulse into the 65+ group on 1 October at the reported national coverage. The
-country's contact matrix is rescaled to spectral radius one, re-weighted by the elderly
-susceptibility and rescaled again, so the realised reproduction number at full susceptibility is
-exactly the pinned R0 in every country, and `sigma_eld` moves *who* is infected, not *how many*.
+country's contact matrix is rescaled to spectral radius one, so the realised reproduction number at
+full susceptibility is exactly the pinned R0 in every country. Infection per contact is the same at
+every age; only children start a season with a higher `S0`.
 
 **Observation.** Weekly counts are negative-binomial around the model mean, which is (infections in
 that age group and week) x (reporting level of the country x visibility of the season x the age
@@ -164,7 +169,6 @@ offset) + an off-season floor per data source, with a dispersion per country.
 | `x_s` | between seasons, shared by all countries, averaging zero | 7 free | season effect on logit `S0` |
 | `c_c` | between countries | 12 | the country's reporting level at the average season, log scale |
 | `delta_s` | between seasons, shared, averaging one | 7 free | season effect on visibility, log scale |
-| `sigma_eld` | nothing: one number | 1 | elderly infection per contact, relative to adults (read as exposure, see below) |
 | `kappa` | nothing: one number, only positive | 1 | children's `S0` modifier: `logit S0_young = logit S0 + kappa` |
 | `off_c,young`, `off_c,eld` | between countries | 24 | how readily children and the elderly are seen, relative to adults |
 | `phi_c` | between countries | 12 | negative-binomial dispersion |
@@ -174,7 +178,7 @@ offset) + an off-season floor per data source, with a dispersion per country.
 So `logit S0_{c,s} = S0_c + x_s` and `log c_{c,s} = c_c + delta_s`: two two-way additive designs on 85
 cells. The country levels carry the mean; the season effects average zero, which is what separates
 them. Children's `S0` sits `kappa` above the adults' on the logit scale in every country and season.
-182 parameters, 16 shared across countries and 166 local to one, so the likelihood is separable
+181 parameters, 15 shared across countries and 166 local to one, so the likelihood is separable
 given the shared block and is fitted by block coordinate descent (appendix I).
 
 **Fixed, not fitted.** R0 = 2.0 everywhere and spatial spread 0 (section 1; appendices E and F);
@@ -182,7 +186,7 @@ infectious period 3.6 days; vaccine effects on infection 0.25, on ILI given infe
 spread 0.20; contact matrices as above; no waning, no ageing, no importation after the seed, no latent
 period, one strain per season. Priors are weak and centred on plausible values; the `S0` prior is
 placed on R0 x `S0` (centre 1.125) so the pin cannot reach the fit through it. The one informative
-prior is on `kappa`: log `kappa` ~ N(log 1.6, 0.2), centred where the refitted model reproduces
+prior is on `kappa`: log `kappa` ~ N(log 1.5, 0.2), centred where the refitted model reproduces
 PHIRST's children-to-adult infection ratio of about 1.7 (appendix L).
 
 **What each fitted quantity means now.**
@@ -197,10 +201,9 @@ PHIRST's children-to-adult infection ratio of about 1.7 (appendix L).
 - `kappa`: how much less immunity children carry into a season than adults, as a shift on the logit
   scale, one number for Europe. Biology, anchored on cohort evidence; the surveillance data alone
   cannot separate it from children's reporting.
-- `sigma_eld`: how much more an elderly person is infected per recorded contact than the contact matrix
-  implies, one number for Europe. The literature does not support higher susceptibility to infection in
-  the elderly -- ageing raises the risk of severe outcomes, not of infection (appendix L) -- so read it
-  as exposure the matrices miss (care homes, contacts household surveys do not record).
+- The elderly have no factor of their own: cohorts find them infected no more often than adults --
+  ageing raises the risk of severe outcomes, not of infection (appendix L) -- so per contact they are as
+  susceptible as adults, and their infections follow from their contacts and their vaccination.
 - The age offsets: surveillance -- how readily each age group is seen, per country.
 
 ## 4. What it learned (the working fit, R0 = 2.0, 2026-09-27)
@@ -209,56 +212,58 @@ PHIRST's children-to-adult infection ratio of about 1.7 (appendix L).
 
 | season | countries | adult `S0`, typical country | adult R0 x `S0`, typical | visibility x normal (95%) | median attack rate |
 |---|---|---|---|---|---|
-| 2014/2015 | 11 | 0.594 | 1.19 | 1.40 (1.28-1.54) | 23% |
-| 2015/2016 | 12 | 0.569 | 1.14 | 1.15 (1.04-1.26) | 18% |
-| 2016/2017 | 12 | 0.603 | 1.21 | 0.93 (0.85-1.02) | 23% |
-| 2017/2018 | 12 | 0.592 | 1.18 | 1.84 (1.68-2.02) | 22% |
-| 2018/2019 | 11 | 0.600 | 1.20 | 1.09 (0.99-1.21) | 23% |
-| 2023/2024 | 11 | 0.600 | 1.20 | 0.58 (0.52-0.65) | 22% |
-| 2024/2025 | 9 | 0.605 | 1.21 | 0.99 (0.88-1.11) | 23% |
-| 2025/2026 | 7 | 0.655 | 1.31 | 0.58 (0.51-0.66) | 32% |
+| 2014/2015 | 11 | 0.588 | 1.18 | 1.40 (1.28-1.54) | 21% |
+| 2015/2016 | 12 | 0.562 | 1.12 | 1.16 (1.05-1.27) | 16% |
+| 2016/2017 | 12 | 0.597 | 1.19 | 0.93 (0.85-1.02) | 21% |
+| 2017/2018 | 12 | 0.585 | 1.17 | 1.84 (1.68-2.02) | 20% |
+| 2018/2019 | 11 | 0.593 | 1.19 | 1.09 (0.99-1.21) | 22% |
+| 2023/2024 | 11 | 0.592 | 1.18 | 0.58 (0.52-0.65) | 19% |
+| 2024/2025 | 9 | 0.598 | 1.20 | 0.99 (0.88-1.11) | 20% |
+| 2025/2026 | 7 | 0.648 | 1.30 | 0.57 (0.50-0.65) | 29% |
 
-The season effect on logit `S0` has sd 0.103; on the log scale of R0 x `S0` that is about 0.037,
+The season effect on logit `S0` has sd 0.101; on the log scale of R0 x `S0` that is about 0.039,
 against 0.40 for visibility. Only two seasons stand apart in how easily they spread: 2015/2016 below,
 2025/2026 above; the other six are within the data's resolution of each other, so their order swaps
 under any small change (it does between pins). Visibility is where the seasons differ: 2017/2018 and
 2014/2015 turned many more infections into consultations, 2023/2024 and 2025/2026 far fewer. The
 negative correlation between the two (-0.61) is in the estimates, not forced by the model (the
-same-season posterior correlation is 0.28), and 2025/2026 carries both extremes on the thinnest data.
-Children's `S0` is higher in every season by the same logit shift: 0.81 in the median country-season
-against 0.60 for adults. With it, the reproduction number at season start is 1.29 in the median
-country-season -- exactly what it was without the modifier: the data fix how fast the epidemic grows,
-and the modifier only moves who carries it. The season and visibility effects are unchanged by it
-(correlation 0.999 with the fit without it); the country ranking of `S0` moves somewhat (0.90), most
-for Ireland, where the modifier also costs the most fit (appendix L).
+same-season posterior correlation is 0.23), and 2025/2026 carries both extremes on the thinnest data.
+Children's `S0` is higher in every season by the same logit shift: 0.79 in the median country-season
+against 0.59 for adults. With it, the reproduction number at season start is 1.28 in the median
+country-season, as without the modifier: the data fix how fast the epidemic grows, and the modifier
+only moves who carries it. The season and visibility effects are unchanged by it (correlation 0.999
+with the fit without it); the country ranking of `S0` moves somewhat (0.90), most for Ireland, where
+the modifier also costs the most fit (appendix L). Removing the elderly factor moved none of these:
+season effects, visibility and the country ranking correlate 1.000 with the fit that had it.
 
 **Countries** (figures 11 to 13):
 
 | country | adult `S0` (95%) | R0 x `S0` | adult reporting | child x adult | 65+ x adult | dispersion | noise excess | median attack |
 |---|---|---|---|---|---|---|---|---|
-| HR | 0.708 (0.697-0.719) | 1.42 | 1.0% | 2.20 | 0.53 | 1.82 | 2.5x | 40% |
-| ES | 0.655 (0.643-0.667) | 1.31 | 2.6% | 1.55 | 0.81 | 1.34 | 2.0x | 30% |
-| FR | 0.628 (0.612-0.643) | 1.25 | 7.4% | 1.16 | 0.78 | 0.60 | 2.6x | 28% |
-| CZ | 0.625 (0.613-0.636) | 1.25 | 2.1% | 2.25 | 0.67 | 0.37 | 2.5x | 26% |
-| DK | 0.610 (0.592-0.627) | 1.22 | 3.0% | 1.35 | 1.24 | 0.40 | 2.4x | 24% |
-| BE | 0.603 (0.586-0.621) | 1.21 | 13.7% | 0.77 | 0.77 | 0.29 | 3.9x | 24% |
-| IT | 0.602 (0.579-0.624) | 1.20 | 23.3% | 1.10 | 0.81 | 0.98 | 3.5x | 22% |
-| NO | 0.590 (0.576-0.604) | 1.18 | 6.0% | 0.24 | 0.54 | 0.65 | 2.3x | 21% |
-| PL | 0.586 (0.573-0.599) | 1.17 | 17.8% | 2.88 | 0.76 | 0.15 | 3.0x | 20% |
-| NL | 0.573 (0.550-0.597) | 1.15 | 3.2% | 1.11 | 3.94 | 0.18 | 2.5x | 18% |
-| EE | 0.567 (0.554-0.580) | 1.13 | 6.7% | 2.80 | 0.55 | 0.24 | 3.4x | 17% |
-| IE | 0.556 (0.526-0.585) | 1.11 | 1.4% | 0.33 | 1.54 | 0.75 | 3.0x | 20% |
+| HR | 0.701 (0.690-0.713) | 1.40 | 1.0% | 2.23 | 1.08 | 1.79 | 2.5x | 36% |
+| ES | 0.649 (0.636-0.661) | 1.30 | 2.6% | 1.55 | 1.78 | 1.33 | 2.0x | 27% |
+| FR | 0.624 (0.608-0.639) | 1.25 | 7.5% | 1.16 | 1.81 | 0.60 | 2.6x | 25% |
+| CZ | 0.623 (0.611-0.635) | 1.25 | 2.1% | 2.24 | 1.46 | 0.37 | 2.5x | 24% |
+| DK | 0.605 (0.587-0.623) | 1.21 | 3.1% | 1.33 | 2.78 | 0.40 | 2.4x | 22% |
+| BE | 0.600 (0.582-0.617) | 1.20 | 14.2% | 0.75 | 1.85 | 0.29 | 3.9x | 21% |
+| IT | 0.592 (0.567-0.616) | 1.18 | 24.5% | 1.07 | 1.90 | 0.98 | 3.5x | 19% |
+| NO | 0.587 (0.573-0.600) | 1.17 | 6.1% | 0.24 | 1.28 | 0.65 | 2.3x | 19% |
+| PL | 0.583 (0.570-0.596) | 1.17 | 18.3% | 2.73 | 1.93 | 0.15 | 3.0x | 18% |
+| NL | 0.574 (0.551-0.597) | 1.15 | 3.4% | 1.08 | 8.63 | 0.18 | 2.5x | 17% |
+| EE | 0.565 (0.551-0.578) | 1.13 | 6.8% | 2.77 | 1.25 | 0.24 | 3.4x | 15% |
+| IE | 0.557 (0.529-0.586) | 1.11 | 1.4% | 0.34 | 3.40 | 0.75 | 3.0x | 19% |
 
-**Age.** Children are infected most: 35% in the median country-season, against 23% for adults and 16%
-for the elderly -- children 1.44 times adults (interquartile 1.32-1.62), the elderly 0.69 times;
-PHIRST found about 1.7 and 0.8. `kappa` = 1.02 (95% 0.76-1.37), pulled down by the data from its prior
-centre of 1.6. `sigma_eld` = 2.22 (1.81-2.72) per contact, read as exposure (section 3). The reporting
-offsets say a child is seen 1.25 times as readily as an adult per infection (median over countries),
-an elderly person 0.78 times.
+**Age.** Children are infected most: 34% in the median country-season, against 22% for adults and 6.5%
+for the elderly -- children 1.42 times adults (interquartile 1.30-1.60), the elderly 0.29 times;
+PHIRST found about 1.7 and 0.8. `kappa` = 0.94 (95% 0.70-1.28), pulled down by the data from its prior
+centre of 1.5. The reporting offsets say a child is seen 1.24 times as readily as an adult per
+infection (median over countries) and an elderly person 1.83 times, from 1.08 in Croatia to 8.6 in the
+Netherlands: with infection per contact the same at every age, the elderly's excess of cases is
+visibility, which fits their more severe illness (appendix L).
 
 **Fit.** Observed and fitted weekly counts correlate at a median of 0.91 per country-season (interquartile
-0.85-0.94). The worst five are Estonia 2014/2015 (0.35), Estonia 2023/2024 (0.42), Czechia 2018/2019
-(0.47), Estonia 2015/2016 (0.58) and Estonia 2016/2017 (0.63): Estonia's series are the noisiest in the
+0.85-0.95). The worst five are Estonia 2014/2015 (0.35), Estonia 2023/2024 (0.42), Czechia 2018/2019
+(0.46), Estonia 2015/2016 (0.58) and Estonia 2016/2017 (0.64): Estonia's series are the noisiest in the
 panel. The noise budget (figure 08): the fit needs 2.6 times the data's own week-to-week scatter
 (median over countries, range 2.0-3.9).
 
@@ -279,13 +284,13 @@ panel. The noise budget (figure 08): the fit needs 2.6 times the data's own week
 
 | claim | number |
 |---|---|
-| the data decide, not the priors | contraction 0.97 (`x_s`), 0.97 (`S0_c`), 0.94 (dispersion), 0.94 (`c_c`), 0.90 (`delta_s`), 0.83 (seeds), 0.82 (baselines), 0.75 (age offsets), 0.70 (`sigma_eld`); the children's modifier 0.25, by design |
-| more susceptible or more visible is separable | posterior correlation of a season's two effects: median 0.28, at most 0.34 |
-| country level and reporting level are separable | posterior correlation: median magnitude 0.11, at most 0.52 |
-| `S0` is read off the shape of the rise | Spearman correlation of the observed early growth rate with the fitted `S0_{c,s}`: 0.47 over 83 waves |
+| the data decide, not the priors | contraction 0.97 (`x_s`), 0.97 (`S0_c`), 0.94 (dispersion), 0.94 (`c_c`), 0.90 (`delta_s`), 0.83 (seeds), 0.82 (baselines), 0.78 (age offsets); the children's modifier 0.23, by design |
+| more susceptible or more visible is separable | posterior correlation of a season's two effects: median 0.23, at most 0.32 |
+| country level and reporting level are separable | posterior correlation: median magnitude 0.10, at most 0.56 |
+| `S0` is read off the shape of the rise | Spearman correlation of the observed early growth rate with the fitted `S0_{c,s}`: 0.46 over 83 waves |
 | no direction the data cannot see | no near-flat eigenvalue of the likelihood-only Hessian; the penalised Hessian is positive definite |
 
-**Where it would fail** (misspecification arms, run 2026-09-26 on this model, one replicate each):
+**Where it would fail** (misspecification arms, run 2026-09-26 before the age changes, one replicate each):
 data simulated from truths the model CANNOT represent, refitted, and the reported rankings scored.
 
 | simulated world | season `S0` rank | visibility rank | **country `S0` rank** | reporting rank | noise excess |
@@ -301,9 +306,8 @@ this; a per-country R0 fitted as an alternative model and compared wave by wave 
 
 ## 6. How far to trust it
 
-**Does it recover a known truth?** (`run_joint_recovery.R`, run 2026-09-26 on this model just before the
-children's modifier was added, figure 16; the modifier is anchored on outside evidence by design, so a
-recovery run would test the other parameters again.)
+**Does it recover a known truth?** (`run_joint_recovery.R`, run 2026-09-26 on the model as it was before
+the children's modifier and the removal of the elderly factor; figure 16.)
 Data are simulated from the model onto the real design -- the same countries, seasons, weeks, missing
 cells and populations -- and the whole pipeline is refitted from scratch.
 
@@ -336,21 +340,25 @@ to read the bottom of the country ranking with care.
 - **Spatial spread** (appendix E): a common spread of a week or more is rejected; a per-country spread
   fits better in total but not wave by wave, does not follow country size, and costs `S0`'s country
   ranking. Fixed at none.
-- **The pin** (appendix F, measured before the children's modifier): from R0 = 1.7 up the fit is flat
+- **The pin** (appendix F, measured before the age changes of 2026-09-27): from R0 = 1.7 up the fit is flat
   within 2 nats and every relative result is unchanged (country ranking 0.99, season effects 0.996,
   visibility 0.998); only the absolute scale moves. The modifier's prior is calibrated at the pin
   (appendix L).
 - **The season asymmetry is the data's** (re-run 2026-09-26 on the fit just before the children's
-  modifier, which leaves the season effects unchanged): widening the prior on the
+  modifier and the removal of the elderly factor, neither of which moves the season effects): widening the prior on the
   season effect on `S0` fourfold, or both season priors fourfold, leaves both spreads where they were
   (0.036 on the log scale of R0 x `S0` against 0.41 for visibility); tightening the visibility prior
   fourfold -- a deliberately hostile setting that costs 7 nats of fit -- still leaves visibility varying
   nine times as much (0.33 against 0.038). `output/joint_model/prior_stress_R0_2.0.rds`.
 - **The children's modifier** (appendix L): the data alone prefer none (profile maximum at zero), but
-  at the fitted value the cost is not evidence with the wave as the unit (at `kappa` = 1, 37 of 85 waves
-  favour it, sign test p = 0.28, every bootstrap interval spans zero); it falls on two countries,
-  Ireland and Croatia. Only a much larger modifier (`kappa` = 3, children infected 2.2 times adults) is
-  rejected, and only at the margin (Wilcoxon p = 0.04).
+  at the fitted value the cost is not evidence with the wave as the unit (at `kappa` = 1, 36 of 85 waves
+  favour it, sign test p = 0.19, every bootstrap interval spans zero); it falls on two countries,
+  Ireland and Croatia. Only large values (`kappa` of 2-3, children infected 2-2.4 times adults) are
+  rejected, and only at the margin (Wilcoxon p = 0.03).
+- **The elderly factor, removed** (appendix L): the data would keep it, modestly but consistently --
+  10.9 raw nats, and 58 of 85 waves and 11 of 12 countries fit better with it (sign test p = 0.001,
+  every bootstrap interval excludes zero). Nothing downstream moves: season effects, visibility and the
+  country ranking correlate 1.000 with the fit that had it.
 - **The noise gap is real** (appendix K): across 18 ways of measuring the data's own scatter the excess
   runs 2.1-3.7 times.
 - **A defect found and closed on the way**: a region of the dispersion where the likelihood formula
@@ -366,6 +374,9 @@ to read the bottom of the country ranking with care.
 5. How much more susceptible children are rests on PHIRST, a South African cohort, not on these data.
 6. The bottom of the country ranking follows data quality: the three noisiest series carry three of the
    four lowest `S0`.
+7. The elderly's share of infection is the contact matrices' (0.29 times adults, against 0.8 in
+   PHIRST), and their counts are matched by visibility instead; the data would move a little of that
+   back into infection.
 
 ## 7. Open questions for reflection
 
@@ -398,10 +409,12 @@ to read the bottom of the country ranking with care.
   surveillance data cannot separate it from children's reporting. PHIRST is a South African cohort --
   a younger population, higher HIV prevalence, different contacts -- so a European anchor (Flu Watch in
   England, or paediatric serology) would be the better prior if one can be extracted.
-- **The elderly factor.** The literature does not support higher susceptibility to infection in the
-  elderly (appendix L), so `sigma_eld` = 2.2 per contact is exposure the matrices miss. Worth deciding
-  whether to keep it as it is, or move it onto the contacts it stands for. The one real exception is
-  subtype: people imprinted on H1 or H2 in childhood, i.e. born before 1968, are more susceptible to
+- **The elderly.** With no factor, the contact matrices set the elderly's share of infection (0.29 times
+  adults, against 0.8 in PHIRST, whose elderly live in multigenerational households) and a reporting
+  offset of about 1.8 matches their counts. The data prefer a correction, modestly (appendix L). If the
+  elderly's attack rate ever becomes a target, the correction belongs on the contacts the matrices miss
+  (care homes, grandparenting), not on susceptibility. The one real age effect on susceptibility is
+  subtype: people imprinted on H1 or H2 in childhood, i.e. born before 1968, are at higher risk from
   H3N2 -- a candidate driver for the learning layer rather than a fixed parameter.
 - **Transmissibility between countries.** The contact matrices are rescaled away; keeping their
   spectral radius (appendix D) would let demography and mixing set part of each country's R0 and leave
@@ -438,7 +451,7 @@ All in `output/joint_model/`, regenerated by `run_joint_model.R` (01-15) and `ru
 | 10 season visibility | how visible each season was per infection | the 2017/2018 peak and the 2023/2024, 2025/2026 troughs |
 | 11 country `S0` | how easily influenza spreads in each country | the ranking, and its caveat |
 | 12 country reporting | how much of each country's infection is seen | the twentyfold spread; the level is the pin's |
-| 13 age reporting | how readily children and the elderly are seen | children about 1.25 times adults: most of their excess is now infection |
+| 13 age reporting | how readily children and the elderly are seen | children about 1.2 times adults, the elderly about 1.8 times |
 | 14 attack rates | who gets infected | children highest, the elderly lowest; the pattern, not the level |
 | 15 data or prior | contraction per parameter family | nothing near zero |
 | 16 recovery | a known truth, simulated and refitted | points on the diagonal |
@@ -517,6 +530,10 @@ exclusion, is in the box at the top of this file and in
   design, which countries are in it is a substantive choice.
 
 ## Appendix D. R0 in a country: what the contact matrix, the age susceptibility and the pyramid do, and do not do
+
+> Written with the elderly susceptibility factor `sigma_eld` in the model. It was removed on 2026-09-27
+> (appendix L): the matrix is now used as rescaled, with no age re-weighting, and everything below
+> holds with `sigma_eld` = 1.
 
 **R0 is fixed in every country and every season** -- at 2.0 since 2026-09-26, at 1.5 before (owner decisions). This section is
 the honest account of what that means once age mixing enters, because it is easy to believe the
@@ -1039,7 +1056,7 @@ Across 18 specifications (3-, 5- and 7-week moving average; epidemic threshold 5
 reported 2.59x sits in the lower half of that range, so the gap is robust and the headline number is
 the conservative end of it, not the flattering one.
 
-## Appendix L. Age and susceptibility: the evidence, the children's modifier and its anchoring (2026-09-27)
+## Appendix L. Age and susceptibility: the evidence, the children's modifier, and the elderly factor removed (2026-09-27)
 
 **The owner's questions.** Would expert knowledge say that children and the elderly both start a season
 more susceptible than adults? And do cohort studies show that an older immune system raises the risk of
@@ -1074,54 +1091,57 @@ infection, or only of severe outcomes?
   susceptibility for children had been rejected by the wave shapes (decisions.md, 2026-09, which named
   children's lower initial immunity as the candidate left to test). Children were infected 0.93 times as
   often as adults, and their whole excess of ILI+ went into a reporting offset of 1.95.
-- *The elderly.* `sigma_eld` (2.1 then, 2.2 now) cannot be higher susceptibility to infection; it is
-  exposure the contact matrices miss -- care homes, contacts household surveys do not record. It is what
-  brings the model's elderly-to-adult infection ratio (0.66 before the modifier, 0.69 with it) near
-  PHIRST's 0.80, so it stays; its reading changes.
+- *The elderly.* `sigma_eld` (2.2 per contact) could not be higher susceptibility to infection; at most
+  it was exposure the contact matrices miss. The owner removed it (below).
 
 **The modifier.** `logit S0_young = logit S0_{c,s} + kappa`, `kappa = exp(log kappa) > 0`: one number for
 all countries and seasons (biology), able only to raise children's `S0` (the owner's constraint), and
-never past 1 (the logit). One parameter, 182 in all. As `kappa` goes to zero it is the previous model:
+never past 1 (the logit). One parameter. As `kappa` goes to zero it is the previous model:
 against the engine of commit `da3a80e` the working fit's log-likelihood agrees to 6.5e-9 nats and every
 fitted mean to 7e-13, and the C++ agrees with the base-R reference to 1e-10.
 
-**What the data say** (`run_kappa_profile.R`: `kappa` held at each value, everything else refitted;
-medians over country-seasons):
+**What the data say** (`run_kappa_profile.R` on the current model, without the elderly factor: `kappa`
+held at each value, everything else refitted from two starts -- the working fit and the nearest value
+already profiled -- because from one start the fit at zero once stuck 45 nats worse, Italy 2024/2025's
+wave moved early and its ERVISS baseline absorbing the counts. Medians over country-seasons. With the
+elderly factor in the model the profile was the same within 2.5 nats.)
 
 | `kappa` | children's / adults' `S0` | log-lik vs none | children-to-adult infection | children's reporting x adult |
 |---|---|---|---|---|
-| 0 | 0.64 / 0.64 | 0 | 0.93 | 1.95 |
-| 0.25 | 0.69 / 0.63 | -1.9 | 1.07 | 1.71 |
-| 0.5 | 0.73 / 0.62 | -4.5 | 1.19 | 1.52 |
-| 1 | 0.80 / 0.60 | -13.0 | 1.43 | 1.26 |
-| 1.5 | 0.86 / 0.58 | -19.4 | 1.66 | 1.09 |
-| 2 | 0.90 / 0.56 | -25.8 | 1.88 | 0.97 |
-| 3 | 0.96 / 0.53 | -36.4 | 2.21 | 0.83 |
+| 0 | 0.64 / 0.64 | 0 | 0.94 | 1.87 |
+| 0.25 | 0.68 / 0.63 | -2.4 | 1.08 | 1.64 |
+| 0.5 | 0.73 / 0.62 | -5.6 | 1.20 | 1.48 |
+| 1 | 0.80 / 0.59 | -15.4 | 1.45 | 1.22 |
+| 1.5 | 0.85 / 0.57 | -21.8 | 1.70 | 1.04 |
+| 2 | 0.90 / 0.54 | -27.9 | 1.95 | 0.92 |
+| 3 | 0.96 / 0.52 | -37.6 | 2.38 | 0.77 |
 
 - **Surveillance alone prefers no modifier, weakly.** As `kappa` rises the children's reporting offset
   falls in step: the level of children's counts is held and only its attribution moves (the tie of
   section 5). What could break the tie is shape -- more susceptible children drive the epidemic more, so
   their wave should lead and steepen relative to the adults' -- and the data barely show it, the verdict
   the per-contact test also gave (decisions.md, 2026-09).
-- **With the wave as the unit, the cost is not evidence at the values that matter.** At `kappa` = 1, 37
-  of 85 waves favour the modifier (sign test p 0.28, Wilcoxon 0.28) and the bootstrap intervals over
-  waves, countries and seasons all span zero; at 1.5 likewise (38 of 85; p 0.39 and 0.11). Small values
-  carry a small consistent cost (at 0.5, -4.5 nats: the wave bootstrap excludes zero, the country
-  bootstrap does not). Only `kappa` = 3, children infected 2.2 times adults, is rejected, at the margin
-  (Wilcoxon p 0.04, sign p 0.05).
-- **The cost is two countries'.** At `kappa` = 1, Ireland carries -11.5 and Croatia -4.6 of the -13.0;
-  the other ten together favour the modifier slightly (+2.9), Italy, France, Denmark and Poland most.
+- **With the wave as the unit, the cost is not evidence at the values that matter.** At `kappa` = 1, 36
+  of 85 waves favour the modifier (sign test p 0.19, Wilcoxon 0.14) and the bootstrap intervals over
+  waves and countries span zero; at 1.5 likewise (37 of 85; p 0.28 and 0.10). Small values carry a small
+  consistent cost (at 0.5, -5.6 nats, Wilcoxon p 0.02: the wave bootstrap excludes zero, the country
+  bootstrap does not), and so do large ones: `kappa` = 2 and 3, children infected 2-2.4 times adults,
+  are rejected at the margin (Wilcoxon p 0.03, sign p 0.05).
+- **The cost is two countries'.** At `kappa` = 1, Ireland carries -12.0 and Croatia -5.6 of the -15.4;
+  the other ten together favour the modifier slightly (+2.2), Italy, France, Denmark and Poland most.
 
 **The decision (owner's instruction, 2026-09-27): the cohort evidence anchors it.** The data cannot
 separate `kappa` from children's reporting and do not reject the cohort value, so the prior carries it:
-`log kappa ~ N(log 1.6, 0.2)`. The centre is where the refitted model reproduces PHIRST's ratio of 1.7
-(1.59 by interpolation in the profile); the sd admits ratios of about 1.45-2.0, for the uncertainty in
-carrying a South African cohort to Europe. The fit: `kappa` = 1.02 (95% 0.76-1.37), children infected
-1.44 times as often as adults (interquartile over country-seasons 1.32-1.62), contraction 0.25 -- the
-data pull it partway back and the prior does most of the work, by design. Against the same model with
-`kappa` held at zero it costs 13.2 raw nats.
+`log kappa ~ N(log 1.5, 0.2)`. The centre is where the refitted model reproduces PHIRST's ratio of 1.7
+(1.49 by interpolation in the profile; 1.59, and a centre of 1.6, while the elderly factor was in the
+model); the sd admits ratios of about 1.45-2.0, for the uncertainty in carrying a South African cohort
+to Europe. The fit: `kappa` = 0.94 (95% 0.70-1.28), children infected 1.42 times as often as adults
+(interquartile over country-seasons 1.30-1.60), contraction 0.23 -- the data pull it partway back and
+the prior does most of the work, by design. Against the same model with `kappa` held at zero it costs
+14.6 raw nats.
 
-**What moved with it, and what did not.**
+**What moved with it, and what did not** (measured when the modifier was added, with the elderly factor
+still in the model).
 
 | quantity | without the modifier | with it |
 |---|---|---|
@@ -1138,7 +1158,39 @@ data pull it partway back and the prior does most of the work, by design. Agains
   Flu Watch (England; Hayward et al., Lancet Respir Med 2014), which measured infection by serology at
   all ages, is the natural European anchor if its age-specific rates can be extracted.
 - `kappa` acts on the logit scale, so the ratio a given value produces depends on the level of `S0`,
-  and so on the R0 pin: the prior centre is calibrated at R0 = 2.0 and must be recalibrated with the pin
-  (`run_kappa_profile.R` prints the new centre).
+  and so on the R0 pin and the age structure: the prior centre is calibrated at R0 = 2.0 without an
+  elderly factor and must be recalibrated when either changes (`run_kappa_profile.R` prints the new
+  centre).
 - The recovery study (section 6) predates the modifier. Since the prior carries `kappa`, a recovery run
   would chiefly re-test the other parameters.
+
+**The elderly factor removed (owner, 2026-09-27).** On the evidence above and on parsimony, `sigma_eld`
+is gone: its slot, its prior and the re-weighting of the contact matrix, so 181 parameters remain and
+each matrix is used as rescaled. With the factor at 1 the new engine reproduces the old to 1.2e-8 nats,
+and the refit reaches the same optimum from a cold start and from the old fit (to 0.000 nats).
+
+| | with the elderly factor | without |
+|---|---|---|
+| log-likelihood (parameters) | -50800.3 (182) | -50811.1 (181) |
+| waves fitted better | 58 of 85 | 27 of 85 |
+| elderly attack rate, median (x adults) | 16% (0.69) | 6.5% (0.29); PHIRST 0.80 |
+| elderly reporting x adult, median over countries | 0.78 | 1.83 |
+| children's modifier `kappa` | 1.02 (prior centre 1.6) | 0.94 (prior centre 1.5) |
+| season effects, visibility, country `S0` ranking | | correlation 1.000 with the fit with the factor |
+
+- **The data would keep it, modestly but consistently.** 10.9 raw nats is small -- 0.13 per wave -- but
+  it is evidence with the wave as the unit: 58 of 85 waves fit better with the factor (sign test p 0.001,
+  Wilcoxon p 0.0001), every bootstrap interval excludes zero (waves -17 to -5 nats, countries -16 to -6,
+  seasons -19 to -3), and 11 of 12 countries lean the same way. Half the cost is in the elderly's own
+  counts and half in the children's: the elderly's share of transmission shapes the whole wave a little.
+- **What it did.** It moved the elderly's excess of cases between infection and visibility. With it,
+  the elderly were infected 0.69 times as often as adults and seen 0.78 times as readily per infection;
+  without it, 0.29 times and 1.8 times. The first matches the cohort's infection ratio; the second
+  matches the literature's reading, since more severe illness makes an infection likelier to reach a
+  doctor. Neither touches what the model is for.
+- **Reading.** The literature rules out higher susceptibility, not higher exposure: the contact matrices
+  may under-record the elderly's contacts (care homes, grandparenting), and PHIRST's elderly live in
+  multigenerational households, so how far below adults the European elderly are infected is not known
+  well enough to fix a correction. The removal trades a small, consistent loss of fit and a lower
+  elderly attack rate for one parameter fewer and a model with nothing to reinterpret; nothing the
+  learning layer uses changes.

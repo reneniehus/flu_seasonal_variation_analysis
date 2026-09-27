@@ -1,12 +1,12 @@
 # joint_model.R -- data assembly, parameter packing, and the fitting strategy for the joint model.
 # The model itself is MODEL.md; the log-posterior is joint_model.cpp; this file is the driver.
 #
-# Fitting strategy, and why. The likelihood is SEPARABLE: only the two season effects, the one elderly
-# susceptibility and the children's S0 modifier appear in more than one country's terms. Everything
-# else is local to a single country. A flat finite-difference gradient over ~182 parameters costs 183 full-likelihood
-# evaluations; a block sweep costs about 33, because a country's own likelihood is a twelfth of the
-# joint one. So we alternate: every country's local block optimised in parallel with the shared block
-# held fixed, then the shared block with the locals held fixed, repeated, then one joint polish.
+# Fitting strategy, and why. The likelihood is SEPARABLE: only the two season effects and the children's
+# S0 modifier appear in more than one country's terms. Everything else is local to a single country. A
+# flat finite-difference gradient over ~181 parameters costs 182 full-likelihood evaluations; a block
+# sweep costs about 33, because a country's own likelihood is a twelfth of the joint one. So we
+# alternate: every country's local block optimised in parallel with the shared block held fixed, then
+# the shared block with the locals held fixed, repeated, then one joint polish.
 #
 # Two guards sit inside that loop, each because the failure it prevents actually happened. Every local
 # block is MULTI-STARTED, because a block has a second optimum in which the dispersion collapses and
@@ -49,18 +49,21 @@ jm_settings = function(){
     # pr_S0_mean = qlogis(pr_Reff0_mean / R0_fixed). So a change of pin moves the prior with it and
     # cannot leak into the fit through it. 1.125 is what 0.75 was at the former pin of 1.5.
     pr_Reff0_mean = 1.125, pr_S0_sd = 1,
-    pr_sigma_mean = 1, pr_sigma_sd = 0.5,     # log2 sigma_eld ~ N(1, .5): centre 2x, 95% band 1.0-4.0x
+    # NO ELDERLY SUSCEPTIBILITY FACTOR (owner, 2026-09-27). Cohorts find the elderly infected no more
+    # often than adults -- an older immune system raises severity, not infection (MODEL.md, appendix L)
+    # -- so, with parsimony, infection per contact is the same at every age; only children's S0 differs.
     # CHILDREN'S S0 MODIFIER (owner, 2026-09-27): children carry less immunity from past seasons, so
     # they start each season more susceptible -- biology, so one value for every country and season,
     # and it can only RAISE their S0: logit S0_young = logit S0 + kappa, kappa = exp(log kappa) > 0.
     # The surveillance data cannot tell children's susceptibility from their reporting (the child
-    # reporting offset absorbs the level; a profile over kappa costs 19 raw nats at 1.5 but is not
+    # reporting offset absorbs the level; a profile over kappa costs 22 raw nats at 1.5 but is not
     # significant with the wave as the unit), so the cohort evidence sets it: the prior is centred on
-    # kappa = 1.6, where the refitted model reproduces PHIRST's children-to-adult infection ratio of
+    # kappa = 1.5, where the refitted model reproduces PHIRST's children-to-adult infection ratio of
     # about 1.7 (Cohen et al. 2021), with sd 0.2 on the log scale, i.e. a ratio of about 1.45-2.0.
-    # Calibrated at R0_fixed = 2.0: kappa acts on the logit scale, so another pin needs another centre
-    # (run_kappa_profile.R prints it; MODEL.md, appendix L).
-    pr_kappa_mean = log(1.6), pr_kappa_sd = 0.2,
+    # Calibrated at R0_fixed = 2.0 without an elderly factor (1.6 with it): kappa acts on the logit
+    # scale, so another pin or age structure needs another centre (run_kappa_profile.R prints it;
+    # MODEL.md, appendix L).
+    pr_kappa_mean = log(1.5), pr_kappa_sd = 0.2,
     pr_delta_sd = 0.5,                        # season observation deviation, constrained to average 0
     pr_off_sd = 1,                            # log2 age reporting offsets
     pr_c_mean = log(0.05), pr_c_sd = 2,       # weak; closes the 'no epidemic' trap at c -> 0
@@ -88,7 +91,7 @@ jm_load_cpp = function(dir = "output/joint_model/cpp_cache"){
 # Counts are ROUNDED here: the panel holds rates, the count scale is a device (MODEL.md), and the
 # negative binomial wants integers.
 # min_seasons = 5L is the OWNER'S DECISION of 2026-09-12 ("5 keeps Spain in"), which is what gives the
-# documented design of 12 countries (85 country-seasons, 182 parameters, today). It was left at 6 here while
+# documented design of 12 countries (85 country-seasons, 181 parameters, today). It was left at 6 here while
 # only run_joint_model.R passed the override, so any other caller reproducing "the model" as the
 # documents describe it silently got an 11-country / 81 / 173 design instead, announced by one buried
 # line of verbose output. The default now IS the decision, and a test pins the resulting design.
@@ -195,11 +198,15 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
   n_src = vapply(srcs, length, integer(1))
   n_cs_of_country = vapply(cds, function(cd) length(cd$seasons), integer(1))
   n_local = 5L + n_src + n_cs_of_country                 # S0, c, 2 offsets, phi, baselines, seeds
-  n_shared = 2L * S                                      # S-1 free x, S-1 free delta, log2 sigma, log kappa
+  n_shared = 2L * S - 1L                                 # S-1 free x, S-1 free delta, log kappa
   if (!(is.numeric(set$tau_fixed) && length(set$tau_fixed) == 1L && set$tau_fixed >= 0 && set$tau_fixed <= 120))
     stop("tau_fixed must be one number of days between 0 and 120")
   if (!(set$pr_Reff0_mean > 1 && set$pr_Reff0_mean < set$R0_fixed))
     stop("pr_Reff0_mean (the prior centre for R0 x S0) must lie between 1 and the pinned R0")
+  # the C++ uses each contact matrix as given, so R0 keeps its meaning only if its spectral radius is 1
+  rho = vapply(cds, function(cd) max(Mod(eigen(cd$Cn, only.values = TRUE)$values)), numeric(1))
+  if (any(abs(rho - 1) > 1e-8))
+    stop("contact matrix not scaled to spectral radius 1 for: ", paste(names(cds)[abs(rho - 1) > 1e-8], collapse = ", "))
   off_country = as.integer(cumsum(c(n_shared, head(n_local, -1))))   # 0-based starts
   n_par = as.integer(n_shared + sum(n_local))
 
@@ -290,8 +297,7 @@ jm_build_data = function(countries, models_in, demo, set = jm_settings(), min_se
 # ---- |-the parameter vector: names, index blocks, starting values ----
 jm_par_names = function(d){
   S = d$n_season
-  nm = c(paste0("x_", head(d$seasons, S - 1)), paste0("delta_", head(d$seasons, S - 1)), "log2_sigma_eld",
-         "log_kappa_young")
+  nm = c(paste0("x_", head(d$seasons, S - 1)), paste0("delta_", head(d$seasons, S - 1)), "log_kappa_young")
   for (ic in seq_len(d$n_country)){
     cc = d$countries[ic]
     nm = c(nm, paste0(cc, c(":logit_S0", ":log_c", ":off_young", ":off_eld", ":log_phi")),
@@ -311,8 +317,7 @@ jm_theta0 = function(d, set = jm_settings()){
   S = d$n_season
   th[seq_len(S - 1)] = 0                                # no season effect on susceptibility
   th[S - 1L + seq_len(S - 1)] = 0                       # no season effect on visibility
-  th[2L * S - 1L] = set$pr_sigma_mean                   # elderly susceptibility at 2x
-  th[2L * S] = set$pr_kappa_mean                        # children's S0 modifier at its prior centre
+  th[2L * S - 1L] = set$pr_kappa_mean                   # children's S0 modifier at its prior centre
   # start every country at R0 x S0 = 1.2, whatever the pin (it was S0 = 0.8 at the former pin of 1.5,
   # which at 2.0 would start every wave implausibly fast), and time the seeds with that growth rate
   S0_start = 1.2 / d$R0_fixed
@@ -638,8 +643,7 @@ jm_unpack = function(th, d){
   out = list(R0 = unname(d$R0_fixed),                 # fixed, reported for convenience
              x = setNames(x, d$seasons),           # the season effect on logit S0
              delta = setNames(c(dev_free, -sum(dev_free)), d$seasons),
-             sigma_eld = unname(2^th[2L * S - 1L]),
-             kappa_young = unname(exp(th[2L * S])),       # children's logit-scale S0 modifier
+             kappa_young = unname(exp(th[2L * S - 1L])),  # children's logit-scale S0 modifier
              tau = unname(d$tau_fixed))                     # the fixed spatial spread, days
   cty = lapply(seq_len(d$n_country), function(ic){
     base = d$off_country[ic]; ics = d$cs_of_country[[ic]] + 1L
@@ -650,8 +654,8 @@ jm_unpack = function(th, d){
     logit_S0_c = th[base + 1]
     list(S0 = unname(plogis(logit_S0_c)),
          S0_season = setNames(plogis(logit_S0_c + x[ss]), sn),
-         S0_young = unname(plogis(logit_S0_c + exp(th[2L * S]))),   # children, at the average season
-         S0_young_season = setNames(plogis(logit_S0_c + x[ss] + exp(th[2L * S])), sn),
+         S0_young = unname(plogis(logit_S0_c + exp(th[2L * S - 1L]))),   # children, at the average season
+         S0_young_season = setNames(plogis(logit_S0_c + x[ss] + exp(th[2L * S - 1L])), sn),
          c = unname(exp(th[base + 2])),
          off_young = unname(th[base + 3]), off_eld = unname(th[base + 4]),
          phi = unname(exp(th[base + 5])),
@@ -704,9 +708,8 @@ jm_summary_season = function(fit){
 }
 
 # ---- |-base-R reference implementation of the SAME model, for the identity test ----
-# Deliberately written straight from the maths rather than by translating the C++, and using R's own
-# eigen() for the spectral radius rather than the C++ power iteration, so the two agree only if both
-# are right. tests/testthat/test-joint-model.R requires 1e-10.
+# Deliberately written straight from the maths rather than by translating the C++, so the two agree
+# only if both are right. tests/testthat/test-joint-model.R requires 1e-10.
 # The spatial spread is likewise computed a DIFFERENT way: here as the direct daily convolution of the
 # local incidence with the kernel (pnorm differences), then summed per week, where the C++ works on the
 # cumulative incidence at week boundaries (erfc). And here it is ALWAYS applied -- at tau = 0 the kernel
@@ -717,13 +720,11 @@ jm_negll_R = function(th, d){
   x_free = th[seq_len(S - 1)]; xs = c(x_free, -sum(x_free))
   dev_free = th[S - 1L + seq_len(S - 1)]
   dev = exp(c(dev_free, -sum(dev_free)))
-  sigma = c(1, 1, 2^th[2L * S - 1L])
   dn = function(x, m, s) -0.5 * ((x - m) / s)^2 - log(s) - 0.5 * log(2 * pi)
-  kappa = exp(th[2L * S])                               # children's logit-scale S0 modifier
+  kappa = exp(th[2L * S - 1L])                          # children's logit-scale S0 modifier
   lp = sum(dn(xs, 0, d$pr_x_sd)) +
        sum(dn(c(dev_free, -sum(dev_free)), 0, d$pr_delta_sd)) +
-       dn(th[2L * S - 1L], d$pr_sigma_mean, d$pr_sigma_sd) +
-       dn(th[2L * S], d$pr_kappa_mean, d$pr_kappa_sd)
+       dn(th[2L * S - 1L], d$pr_kappa_mean, d$pr_kappa_sd)
   tau = d$tau_fixed
   K = ceiling(7 * tau)
   w = diff(pnorm((seq(-K, K + 1) - 0.5) / tau)); w = w / sum(w)   # mass of N(0, tau^2) per day bin
@@ -735,8 +736,7 @@ jm_negll_R = function(th, d){
     if (!(phi <= 1e8)) return(1e10)          # the phi hole: rejected, exactly as the .cpp does
     b = exp(th[base + 5 + seq_len(nsrc)])
     I0v = exp(th[base + 5 + nsrc + seq_len(d$n_cs_of_country[ic])])
-    Cs = sweep(d$Cn[[ic]], 1, sigma, "*")
-    Cs = Cs / max(abs(eigen(Cs, only.values = TRUE)$values))
+    Cs = d$Cn[[ic]]                                        # spectral radius 1, checked by jm_build_data
     N = d$N[[ic]]
     for (ics in d$cs_of_country[[ic]] + 1L){
       y = d$y[[ics]]; nw = nrow(y); s = d$cs_season[ics] + 1L
@@ -800,24 +800,22 @@ jm_identifiability = function(fit, verbose = TRUE){
   S = d$n_season
   fam = ifelse(grepl("^x_", nm), "S0 season effect (shared)",
         ifelse(grepl("^delta_", nm), "season deviation (shared)",
-        ifelse(grepl("log2_sigma", nm), "elderly susceptibility (global)",
         ifelse(grepl("log_kappa_young", nm), "children's S0 modifier (global)",
         ifelse(grepl(":logit_S0", nm), "S0 (country)",
         ifelse(grepl(":log_c$", nm), "reporting c (country)",
         ifelse(grepl(":off_", nm), "age reporting offset",
         ifelse(grepl(":log_phi", nm), "dispersion phi",
         ifelse(grepl(":log_b_", nm), "baseline b",
-        ifelse(grepl(":log_I0_", nm), "seed I0 (country-season)", nm))))))))))
+        ifelse(grepl(":log_I0_", nm), "seed I0 (country-season)", nm)))))))))
   pr_sd = ifelse(grepl("^x_", nm), d$pr_x_sd,
           ifelse(grepl("^delta_", nm), d$pr_delta_sd,
-          ifelse(grepl("log2_sigma", nm), d$pr_sigma_sd,
           ifelse(grepl("log_kappa_young", nm), d$pr_kappa_sd,
           ifelse(grepl(":logit_S0", nm), d$pr_S0_sd,
           ifelse(grepl(":log_c$", nm), d$pr_c_sd,
           ifelse(grepl(":off_", nm), d$pr_off_sd,
           ifelse(grepl(":log_phi", nm), d$pr_phi_sd,
           ifelse(grepl(":log_b_", nm), d$pr_b_sd,
-          ifelse(grepl(":log_I0_", nm), d$pr_I0_sd, NA_real_))))))))))
+          ifelse(grepl(":log_I0_", nm), d$pr_I0_sd, NA_real_)))))))))
   e_lik = eigen(H_lik, symmetric = TRUE, only.values = TRUE)$values
   e_post = eigen(H_post, symmetric = TRUE, only.values = TRUE)$values
   V_post = tryCatch(solve(H_post), error = function(e) NULL)
