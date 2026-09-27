@@ -1248,3 +1248,16 @@ stuck 45 nats worse: Italy 2024/2025, its only ERVISS season, moved its wave ear
 baseline absorb the counts. The flat-line protector does not look for this mode, and every
 "against none" comparison inherited it. `run_kappa_profile.R` now fits each value from two starts (the
 working fit and the nearest value already profiled), keeps the better, and prints any disagreement.
+
+**The recovery study, re-run on this model (the first since both age changes).**
+- Recovered: the country `S0` ranking 0.97, the season effects 0.97, visibility 0.99. Median interval
+  coverage is 93%. A driver effect comes back unbiased: 0.245 for 0.25, and 0.359 for 0.35.
+- Not recovered, as designed: the children's modifier. Simulated at 0.94, it comes back at 1.22,
+  pulled towards its prior centre, and its intervals cover 4 of 8.
+- Every country's adult `S0` shifts about 0.06 logit down with it, to keep the growth rates (the
+  correlation of the two errors across replicates is -0.97). That drops `S0_c` coverage to 77%.
+  Relative to that common shift the country errors are 0.03 logit and the ranking holds.
+- Misspecification: the country ranking falls to 0.27 when true R0 differs between countries (0.07 in
+  the previous single replicate).
+- Figure 16 no longer caps a single-truth panel at the edge. The modifier's offset from its truth is
+  the finding, not a failure, and every panel now keeps its diagonal in view.

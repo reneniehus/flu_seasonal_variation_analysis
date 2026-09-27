@@ -703,17 +703,19 @@ plot_jm_recovery = function(rec, d, summ = NULL){
   # and would squash every other panel flat. Such points are WINSORISED FOR DISPLAY ONLY, drawn as
   # open triangles at the panel edge and counted in the subtitle, so they are visible rather than
   # hidden and the informative range stays readable. The cap is 35% of the family's own truth range
-  # beyond its extremes, falling back to 35% of the level itself where a family has a single truth
-  # value (the global children's S0 modifier), so that band is never zero-width.
+  # beyond its extremes. A family with a single truth value (the global children's S0 modifier) is
+  # never capped: its few points cannot squash a panel, and how far they sit from the truth -- a prior
+  # pulling the estimate -- is the finding, not a failure.
   cmp = cmp %>% group_by(family) %>%
     mutate(rng = diff(range(truth)),
-           cap_hi = max(truth) + 0.35 * ifelse(rng > 0, rng, abs(max(truth))),
-           cap_lo = min(truth) - 0.35 * ifelse(rng > 0, rng, abs(max(truth))),
+           cap_hi = ifelse(rng > 0, max(truth) + 0.35 * rng, Inf),
+           cap_lo = ifelse(rng > 0, min(truth) - 0.35 * rng, -Inf),
            off = estimate > cap_hi | estimate < cap_lo,
            shown = pmin(pmax(estimate, cap_lo), cap_hi)) %>% ungroup()
   n_off = sum(cmp$off)
   ggplot(cmp, aes(truth, shown)) +
     geom_abline(slope = 1, intercept = 0, colour = "grey45", linetype = "dashed") +
+    geom_blank(aes(y = truth)) +          # every panel's range includes its truths, so the diagonal shows
     geom_point(data = cmp %>% filter(!off), alpha = 0.55, size = 1.7, colour = .jm_blue) +
     geom_point(data = cmp %>% filter(off), shape = 2, size = 2.2, stroke = 0.8, colour = .jm_orange) +
     facet_wrap(~ family, scales = "free") +

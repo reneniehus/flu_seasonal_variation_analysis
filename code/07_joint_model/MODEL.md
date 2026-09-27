@@ -111,12 +111,13 @@ than its prior (contraction 0.78-0.97), except the children's modifier, which is
 evidence by design (0.23). The two questions the design must answer from shape alone --
 *a bigger season: more susceptible or more visible?* and *a big country: more infections or more
 seen?* -- are answered: the posterior correlations are 0.23 and 0.10. On data simulated from the model onto the real design and refitted
-from scratch (run 2026-09-26, before the age changes of 2026-09-27), the country ranking of `S0` comes back
-at 0.97, the season effects at 0.98 and visibility at 1.00, the intervals cover 97% of the time, and a
-known driver effect on the season parameters is recovered without bias. Three
+from scratch (re-run 2026-09-27 on this model), the country ranking of `S0` comes back at 0.97, the
+season effects at 0.97 and visibility at 0.99, the intervals cover 93% of the time, and a known driver
+effect on the season parameters is recovered without bias. The children's modifier comes back where its
+prior pulls it, not where the truth is, and the level of `S0` shifts with it (section 6). Three
 limits are measured, not assumed: the deterministic curve needs 2.6 times more noise than the data's
 own week-to-week scatter, so part of what it calls measurement error is misfit; the country ranking of
-`S0` does not survive real transmissibility differences between countries (it falls to 0.07 on
+`S0` does not survive real transmissibility differences between countries (it falls to 0.27 on
 simulated data where they differ by 10%); how much more susceptible children are rests on the
 cohort evidence, not on these data; and without an elderly factor the contact matrices set the
 elderly's share of infection, which the data would raise slightly (10.9 nats; 58 of 85 waves). One pattern is unexplained: the country ranking of `S0` follows
@@ -290,45 +291,53 @@ panel. The noise budget (figure 08): the fit needs 2.6 times the data's own week
 | `S0` is read off the shape of the rise | Spearman correlation of the observed early growth rate with the fitted `S0_{c,s}`: 0.46 over 83 waves |
 | no direction the data cannot see | no near-flat eigenvalue of the likelihood-only Hessian; the penalised Hessian is positive definite |
 
-**Where it would fail** (misspecification arms, run 2026-09-26 before the age changes, one replicate each):
+**Where it would fail** (misspecification arms, re-run 2026-09-27 on this model, one replicate each):
 data simulated from truths the model CANNOT represent, refitted, and the reported rankings scored.
 
 | simulated world | season `S0` rank | visibility rank | **country `S0` rank** | reporting rank | noise excess |
 |---|---|---|---|---|---|
-| control, truth representable | 0.89 | 1.00 | **0.98** | 0.99 | 1.27x |
-| each country's true R0 differs (sd 0.10 on the log scale, i.e. 0.84-1.20) | 0.96 | 0.96 | **0.07** | 0.84 | 1.26x |
-| a second wave the SIR cannot make (+60% late in every season) | 0.86 | 1.00 | **0.96** | 0.99 | 1.27x |
+| control, truth representable | 0.89 | 1.00 | **0.99** | 1.00 | 1.25x |
+| each country's true R0 differs (sd 0.10 on the log scale, i.e. 0.84-1.20) | 0.93 | 0.93 | **0.27** | 0.93 | 1.27x |
+| a second wave the SIR cannot make (+60% late in every season) | 0.79 | 1.00 | **0.99** | 0.99 | 1.27x |
 
 The country ranking collapses when transmissibility genuinely differs between countries -- with R0
-pinned, that difference has nowhere to go but `S0_c`, which is what a blunt sensor does -- while the
-season results survive both violations. The noise budget sees neither, so it is not the diagnostic for
+pinned, that difference has nowhere to go but `S0_c`, which is what a blunt sensor does (0.07 in the
+previous run, 0.27 in this one: one replicate each) -- while the season results largely survive both
+violations. The noise budget sees neither, so it is not the diagnostic for
 this; a per-country R0 fitted as an alternative model and compared wave by wave would be.
 
 ## 6. How far to trust it
 
-**Does it recover a known truth?** (`run_joint_recovery.R`, run 2026-09-26 on the model as it was before
-the children's modifier and the removal of the elderly factor; figure 16.)
+**Does it recover a known truth?** (`run_joint_recovery.R`, re-run 2026-09-27 on this model, figure 16.)
 Data are simulated from the model onto the real design -- the same countries, seasons, weeks, missing
 cells and populations -- and the whole pipeline is refitted from scratch.
 
 | study | what the truth is | what comes back |
 |---|---|---|
-| local, 8 replicates | the fitted optimum | country `S0` ranking 0.97 (median Spearman); season effects on `S0` Pearson 0.98 (Spearman 0.88: the six near-tied seasons swap); visibility 1.00; 95% intervals cover 97% (median over families; `S0_c` 92%, season effects 98%, visibility 100%, reporting 96%) |
-| prior-space, 4 replicates | drawn from the priors | season effects Spearman 1.00 for both; country `S0` ranking 0.997; coverage 83-96% for most families, but the elderly susceptibility covered in only 1 of 4 |
-| driver, 6 replicates | a covariate moves both season effects by a known amount | effect on logit `S0`: 0.240 +/- 0.032 for a true 0.25; on log visibility: 0.346 +/- 0.051 for a true 0.35 -- unbiased |
+| local, 8 replicates | the fitted optimum | country `S0` ranking 0.97 (median Spearman); season effects on `S0` Pearson 0.97 (Spearman 0.89: the six near-tied seasons swap); visibility Pearson 0.99 (Spearman 1.00); 95% intervals cover 93% (median over families; season effects 98%, visibility 93%, reporting 94%, but `S0_c` 77% and the children's modifier 4 of 8) |
+| prior-space, 4 replicates | drawn from the priors | season effects Spearman 1.00 and 0.98; country `S0` ranking 0.997; coverage 89-100% in every family |
+| driver, 6 replicates | a covariate moves both season effects by a known amount | effect on logit `S0`: 0.245 +/- 0.029 for a true 0.25; on log visibility: 0.359 +/- 0.068 for a true 0.35 -- unbiased |
 
-What this says. On data like ours the estimator finds the truth and its intervals mean what they say;
-over the wider prior space the rankings hold and the intervals mostly do. The learning layer's own
-procedure -- fit, then regress the fitted season effects on a driver -- returns the driver's effect
-without attenuation, so its slopes can be read at face value. The off-season baseline is biased (it is
-a nuisance parameter), and so, a little, is Croatia: its `S0` comes back 0.044 logit low, more than
-its interval's half-width, because the seed prior pulls its very small seeds up and a lower `S0` keeps
-the timing (section 7, seeding on 1 August).
+What this says. On data like ours the estimator finds the season effects, visibility, reporting and
+the country ranking, and their intervals mean what they say; over the wider prior space the rankings
+hold and the intervals do. The learning layer's own procedure -- fit, then regress the fitted season
+effects on a driver -- returns the driver's effect without attenuation, so its slopes can be read at
+face value.
+
+Two things are not recovered, and they are one thing. The children's modifier, simulated at 0.94, comes
+back at 1.22 (1.10-1.36), pulled towards its prior centre of 1.5, and its intervals cover 4 of 8: an
+anchored prior on weak data does exactly that. Every country's `S0` then comes back about 0.06 logit low
+to keep the waves' growth -- the replicate's mean `S0` error and its modifier error correlate at -0.97 --
+so `S0_c`'s intervals cover only 77%. With that common shift removed the country errors are 0.03 logit
+and the ranking is untouched. So the modifier and the LEVEL of `S0` are set by the prior on the
+modifier, as the design intends; the ranking and the season effects are the data's. The off-season
+baseline is biased too (a nuisance parameter).
 
 **The data-quality pattern is not the estimator's.** The country ranking of `S0` follows the
 dispersion (0.75 on the fit without the children's modifier, 0.52 with it: the three noisiest series,
-Poland, the Netherlands and Estonia, carry three of the four lowest `S0`). If noise flattened the fitted waves, the recovery would show the noisy
-countries' `S0` biased low; it shows them biased up by less than 0.01 logit. So the association is in
+Poland, the Netherlands and Estonia, carry three of the four lowest `S0`). If noise flattened the fitted
+waves, the recovery would show the noisy countries' `S0` biased low against the others; relative to the
+common shift, Poland and Estonia come back 0.03 logit high and the Netherlands 0.02 low. So the association is in
 the data, or in misfit the simulation does not contain -- an open question (section 7), and a reason
 to read the bottom of the country ranking with care.
 
@@ -454,7 +463,7 @@ All in `output/joint_model/`, regenerated by `run_joint_model.R` (01-15) and `ru
 | 13 age reporting | how readily children and the elderly are seen | children about 1.2 times adults, the elderly about 1.8 times |
 | 14 attack rates | who gets infected | children highest, the elderly lowest; the pattern, not the level |
 | 15 data or prior | contraction per parameter family | nothing near zero |
-| 16 recovery | a known truth, simulated and refitted | points on the diagonal |
+| 16 recovery | a known truth, simulated and refitted | points on the diagonal; the children's modifier above it, pulled by its prior |
 
 Figures 17 (sensing with `S0` or R0) and 18 (what makes a wave fat) belong to the investigations in
 appendices G and E and were produced at commits `7b04681` and `c9286b7`, under the former pin of 1.5.
@@ -1161,8 +1170,10 @@ still in the model).
   and so on the R0 pin and the age structure: the prior centre is calibrated at R0 = 2.0 without an
   elderly factor and must be recalibrated when either changes (`run_kappa_profile.R` prints the new
   centre).
-- The recovery study (section 6) predates the modifier. Since the prior carries `kappa`, a recovery run
-  would chiefly re-test the other parameters.
+- In the recovery study (section 6) the modifier comes back at its prior's pull, not at the truth --
+  simulated at 0.94, estimated at 1.22 -- and the level of adults' `S0` shifts with it. That is the
+  design working as intended: the modifier, and with it the level of `S0`, is the cohort's; the ranking
+  and the season effects are the data's.
 
 **The elderly factor removed (owner, 2026-09-27).** On the evidence above and on parsimony, `sigma_eld`
 is gone: its slot, its prior and the re-weighting of the contact matrix, so 181 parameters remain and
