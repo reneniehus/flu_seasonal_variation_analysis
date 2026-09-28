@@ -332,3 +332,955 @@ Gibbs helpers, setup.R pruning) are not decisions and are only noted in commit m
   the rise window that identifies S0 (profile-likelihood check: at the regularised q_I the data barely
   constrain S0 beyond its prior). Not hot-swapped (the priors/P0 are tuned to the additive scale);
   'additive vs proportional (log-I) q_I' joins the p0/q_I sensitivity plan above.
+
+## 2026-09 compartmental model (`flu_comp_model` branch): assumptions fixed before the rewrite
+
+The age- and vaccination-structured multi-season model is being rewritten in base R with an EKF.
+Every assumption, with provenance (owner decision / Stan model / old notes / data / proposal), is
+spelled out in `code/06_comp_model/ASSUMPTIONS.md` and encoded in
+`code/06_comp_model/comp_model_settings.R`. Decisions of record made here:
+
+- **Contact-matrix scaling.** The Stan model's `beta * a_factor * rowNormalised(C)` equals
+  `(beta / cbar) * C`, whose realised R0 at full susceptibility is `R0 * rho(C)/cbar` = 1.58-1.73 across
+  the 28 country matrices (median 1.65) instead of the intended 1.5, varying by country. The model now
+  divides the contact matrix by its dominant eigenvalue so the next-generation matrix has spectral
+  radius exactly R0_s (the normalisation this log recommended in 2026-06). `a_factor` is dropped.
+- **Season-level R0_s shared across countries**, strong prior around 1.5; identified only by pooling
+  across countries (within one country-season it trades off with S0), so per-country stage fits keep
+  R0 fixed.
+- **No likelihood tempering.** The Stan runner's `weight_obs_epi = 0.1` and the separate
+  cumulative-burden term are dropped: the weekly likelihood already contains the season burden.
+- **Detection age-invariant**; one reporting proportion per country; three age groups 0-14/15-64/65+.
+- **Vaccination timing as before**: one 65+ pulse on 1 October, none for younger groups (no data).
+- Fixed values from the owner's notes: gamma = 0.2777778/day (3.6 d), ve_inf = 0.25,
+  ve_ili_cond_inf = 0.20, ve_spread = 0.20; season-specific VE from the provenance CSV is a switch.
+
+## 2026-09 compartmental model: what the Danish pilot changed (evidence in `code/06_comp_model/ASSUMPTIONS.md`)
+
+The first fits of the age- and vaccination-structured model on Denmark, read through the eyeballing
+figures, overturned four of the assumptions first agreed. Each is a settings switch so the earlier
+variant stays reproducible; the defaults now follow the evidence and await the owner's confirmation.
+
+- **Per-season seed size (arrival time).** A fixed 1 August seed with S0 shared across seasons left no
+  handle on when a season arrives: the deterministic SIR peaked at week 15-22 against observed peaks
+  at week 30-35, and the filter could only follow the data by abandoning the model. A per-season seed
+  (log-normal deviation) shifts arrival without touching the growth rate -- the smooth form of the
+  Stan model's disabled `i_season` term.
+- **Age-specific reporting (Stan `prop_ili_age`).** Age-invariant reporting over-predicted the medium
+  group ~2x in every season; the age-offset fit is 118 nats better (medium adults report ~0.5x the
+  young and ~0.35x the elderly per infection). This reverses the "detection age-invariant" decision,
+  pending the owner: it is an age effect on ILI-per-infection or care-seeking, indistinguishable here
+  from age-specific susceptibility.
+- **Per-season reporting deviation (Stan `prop_ili_season`).** With S0 shared and R0_s the only season
+  factor, the 2-4x larger 2015/16, 2017/18 and 2024/25 peaks cannot be reproduced -- a larger R0 also
+  makes a wave sharper and earlier -- and widening the R0 prior (sd 0.05 -> 0.3) changed nothing; the
+  likelihood keeps R0_s within 1.44-1.60. A season deviation on reporting absorbs the size differences
+  (89 nats; 0.5-1.7x). Consequence for the joint stage: season size may need a Europe-wide severity
+  factor alongside R0_s.
+- **Baseline per data source.** One shared baseline forced phi towards 1, which is the measured reason
+  to split it. **The reason first recorded here was wrong (corrected 2026-09-16):** it said RespiCompass
+  ILI+ is exactly zero before the wave while the ERVISS reconstruction has a positive floor. Where both
+  sources are observable (357 country-weeks of the 2023/2024 overlap, 12 design countries) RespiCompass
+  is zero with ERVISS positive 0 times and the reverse 0 times; they are zero together 112 times. The
+  difference is which WEEKS each source covers, so `b` is a coverage-era nuisance parameter and the
+  fitted gap between the two slots (up to 392x) measures coverage rather than a surveillance property.
+- **EKF design.** Estimating q let the filter carry the wave (q -> 0.3-0.6) and the mechanistic
+  parameters wandered; a seed-scaled initial covariance was exploited the same way (the EKF objective
+  preferred a degenerate baseline-plus-noise mode, 6564 vs 9100). Decisions: two-stage fitting
+  (deterministic first, EKF from that optimum), P0 = 0, q fixed at 5% weekly -- the filter is a wiggle
+  layer, not a replacement for the model. With these, the EKF optimum agrees with the deterministic
+  one in every parameter (S0 0.830 vs 0.834; R0_s within 0.02).
+- **Observation noise.** The age-specific weekly series scatter 23% around a 3-week moving average
+  (phi ~ 3 irreducible); the phi prior was recentred from 15 to 4.
+- **C++ engine.** Verified identical to the R reference to 1e-10 on synthetic and real data
+  (`tests/testthat/test-comp-model-cpp.R`, 39 assertions); the default engine for fitting.
+
+## 2026-09 compartmental model: which age mechanism? (12 countries, PHIRST)
+
+**Question.** Age-invariant reporting over-predicted the medium group in Denmark. Two mechanisms can
+absorb that and are not separable on one country: age-specific REPORTING (ILI+ per infection differs
+by age; dynamics untouched) or age-specific SUSCEPTIBILITY (the attack-rate profile itself differs).
+The owner's test: biology should show the same sign in every country, surveillance should not; the
+external anchor is the PHIRST cohort (South Africa, twice-weekly PCR irrespective of symptoms,
+Cohen et al. 2021, Figure 2A), whose infection incidence by age collapses to our groups as
+young/adult 1.65-1.80 and elderly/adult 0.80.
+
+**Design.** `code/06_comp_model/run_age_experiment.R`: the 12 countries with >= 6 age-complete seasons,
+four variants -- A none, B reporting offsets, C per-contact susceptibility (row scaling of the contact
+matrix renormalised to spectral radius 1, so R0_s keeps its meaning), D both. Nested variants are
+warm-started from their parent's optimum and polished from the parent's EKF optimum (the objective is
+bimodal: a reporting-like and a susceptibility-like mode; without this D 'lost' to B by optimiser
+noise). Gains are pure EKF log-likelihoods (each N(0,1) age prior adds 0.92 nats at its centre).
+`run_susc_grid.R`: the profile likelihood of ONE susceptibility profile shared by all countries
+(young x elderly grid) with the reporting offsets free per country -- the across-country separation.
+
+**Findings.**
+1. *Direction.* Under age-invariant reporting the contact structure alone under-predicts the young
+   in 10/12 countries and the elderly in 11/12 (relative to adults; exceptions NO and IE for the
+   young, HR for the elderly). The same sign almost everywhere = an age effect the model lacks; but
+   the magnitudes (young 0.45-5.2x, elderly 0.95-7.2x) are far too heterogeneous for biology, so
+   country-specific reporting is needed whatever else is true.
+2. *Per-country likelihood.* Reporting offsets beat susceptibility in 9/12 countries (median gain
+   over A: 188 vs 130 nats; |difference| > 2 nats in 11/12); susceptibility wins in EE (+56), IE (+5),
+   BE (+2). Both together add a median 8 nats (-1 to +55) over the better single mechanism, and
+   within a country the elderly effect wanders freely between the two -- the trade-off predicted.
+3. *Attack-rate profile vs PHIRST.* With contacts alone (A, B): young/adult 0.95 (0.74-1.17),
+   elderly/adult 0.29 (0.16-0.47). Per-country susceptibility (C) reproduces PHIRST's young ratio
+   in the median (1.76) but ranges 0.34-6.6 across countries; elderly 0.50.
+4. *Shared profile, reporting free (the decisive test).* Total over 12 countries: best at young 1.0,
+   elderly 1.7 (+89 nats; elderly 2.8: +39). Any extra young susceptibility LOSES likelihood in
+   almost every country (1.4: -55 to -89 total; 1.8: -210 to -290; 2.4: about -500; per country only
+   PL wants 1.8 and DK is flat at 1.4). Every country's own best profile has elderly > 1 (2.8 in 8 of
+   12), with gains of 1-13 nats each (EE 59). Under it the elderly/adult attack ratio is 0.5-0.9
+   (BE 0.78, DK 0.86, IT 0.90, NO 0.90), close to PHIRST's 0.80; the young/adult ratio stays ~1.
+
+**Reading.** The young excess in the observations is a LEVEL effect: once each country's reporting
+level is free, the weekly wave shapes reject the young being more susceptible per contact than the
+contact matrix implies (a higher young share of transmission would make their wave earlier and
+sharper relative to the adults', and the data do not show it). It is reporting -- children consult
+more per infection, paediatric sentinel practices -- with a magnitude that is a property of each
+surveillance system. The elderly excess has a DYNAMIC component with the same sign in all 12
+countries: the elderly are infected roughly 1.7-2.8x more per contact than the (vaccination-adjusted)
+contact matrix implies -- immunosenescence, care homes, or contact matrices that understate the
+elderly's exposure. That is the shared-biology signature the owner's test asked for, and it moves
+the modelled elderly attack rate to where the reporting-independent cohort puts it.
+
+**Unresolved.** PHIRST's young/adult infection ratio of 1.7 against the model's ~1.0 at any
+plausible young susceptibility. The remaining candidate is age-specific INITIAL immunity (S0 by age,
+open decision E2/11.1): adults carry more prior immunity than children, which raises the young's
+attack rate with a different shape signature than per-contact susceptibility. A grid over
+S0_young/S0_adult with reporting free is the next test; child-child contact weights of the synthetic
+matrices are the other suspect.
+
+**DECIDED by the owner, 2026-09-11.** Three decisions, taken on the evidence above:
+1. ONE elderly susceptibility factor SHARED ACROSS COUNTRIES, with the YOUNG FIXED AT 1. Biology is
+   one number for Europe, not twelve; and the grid showed a free young factor loses likelihood in 10
+   of 12 countries, so fitting it would only let it re-absorb reporting level. Prior
+   `log2 sigma_eld ~ N(1, 0.5)`: centre 2x, 95% band 1.0-4.0x.
+2. AGE REPORTING OFFSETS ARE FITTED, one pair per COUNTRY, SHARED ACROSS that country's SEASONS --
+   reporting is a property of a surveillance system, not of a season.
+3. AGE-SPECIFIC INITIAL IMMUNITY IS PARKED (not rejected) to keep the model from over-complicating
+   and to avoid a third age parameter trading off against the two we keep. Consequence, to be
+   REPORTED rather than fitted: the model's absolute attack rate in the young is probably too low,
+   and PHIRST's young/adult ratio of ~1.7 against the model's ~1.0 stands as a documented shortfall.
+4. The SEASON OBSERVATION DEVIATION is ONE VALUE PER SEASON, SHARED ACROSS COUNTRIES (8 parameters,
+   not 96): the observation-side twin of the shared season transmissibility. Interpretation: ILI+
+   per infection in that season relative to the norm -- strain symptomaticity (viral, shared), plus
+   whatever season size the mechanism cannot produce. The per-country deviations already moved
+   together (FR-ES 0.97, FR-NO 0.82, DK-ES 0.78); Estonia is the known exception, so
+   country-season misfit now lands in phi, S0_c or R0_s and must be watched. Per-country fits keep
+   the deviation free per season as the warm start and as the diagnostic of the sharing assumption.
+PHIRST remains a check, not a target. D (both mechanisms free per country) is not to be fitted --
+it is unidentified within a country. Recorded in ASSUMPTIONS.md C7, F2, E5, 11.1, 11.2.
+
+**Also this round.** Seed prior recentred to 10^-6.5 (sd 3) after 29% of fitted seeds fell below the
+old prior's lower bound (late waves need small seeds); the EKF post-update clamp floored at 1e-12
+instead of 0 and re-seeded the vaccinated infectious weekly (fixed in both engines, tested); the
+fitter's start vector is built by one function checked for every switch combination (a missing slot
+had silently shifted every later parameter); the parameters are spelled out in words in
+ASSUMPTIONS.md section 12 (phi = measurement noise, does not propagate; q = process noise, does).
+
+## 2026-09-12 compartmental model: identifiability, measured
+
+**Method.** At each country's fitted optimum, the Hessian of the PURE negative log-likelihood (the
+observed Fisher information: the curvature of the fit-quality landscape, with the priors switched off)
+and of the penalised objective. Eigenvalues are the steepnesses of that landscape, eigenvectors the
+directions; a near-zero eigenvalue is a parameter COMBINATION the data cannot see at all. The
+difference between the two matrices is exactly what the priors hold up. Twelve countries, 86
+country-seasons, current defaults (age reporting offsets on, no age susceptibility).
+
+**Finding 1 -- an EXACT flat direction, in all 12 countries.** Every spectrum contains an eigenvalue
+of magnitude 2.6e-8 to 2.3e-7 against a largest of 1.3e5 to 3.4e5, i.e. zero to machine precision.
+Its eigenvector matches the reporting symmetry with cosine 1.000: the likelihood depends on the
+country reporting level `c_c` and the season deviations `exp(delta_s)` only through their products, so
+`c -> c*k` with `delta_s -> delta_s - log k` is numerically invisible. Nine knobs, eight products. On
+Denmark 89% of the flat direction sits on the eight deviations and 11% on the country level. Today only
+the weak N(0, 0.5) prior on the deviations decides where along that valley the fit stops, so the
+ABSOLUTE reporting proportion is an assumption read back, not a result. FIX (required before the joint
+fit): constrain the deviations to a geometric mean of one. With the deviations SHARED across countries
+(decision 2026-09-11) this matters more, not less: one flat direction would then slide all twelve
+country reporting levels together as a block.
+
+**Finding 2 -- susceptibility is ENTANGLED, and the joint fit is the cure.** `S0` never appears alone:
+only as `R0_s*S0` (rise rate), `c*S0` (level) and `I0_s/S0` (arrival). Conditionally -- everything else
+known -- the data pin logit `S0` to sd 0.0067. Marginally, with the eight season `R0_s` free, the
+likelihood-only sd is 1.04 (median over 11 countries; range 0.75-2.15), i.e. a 150-fold inflation from
+the trade-off. On Denmark that is a 95% range of S0 = 0.27-0.985: effectively nothing. Treat the
+`R0_s` as KNOWN and the same data give 0.825-0.839. Median sharpening 50x (range 11-160x). This is the
+quantitative case for the joint fit: pooling `R0_s` over 12 countries removes the partner `S0` trades
+with. CAVEAT: the conditional calculation is an UPPER BOUND, since a joint fit pins `R0_s` with finite
+precision; but 8 numbers carried by 86 waves should recover much of it.
+
+**Finding 3 -- today's S0 error bars are borrowed from the R0 prior.** The penalised fit reports logit
+`S0` to sd 0.112, far tighter than the likelihood alone (1.04) or its own prior (1.0) can give. The
+tight `log R0 ~ N(log 1.5, 0.05)` prior is what breaks the entanglement from outside. PREDICTION to
+test: widening that prior leaves the point estimates alone (as the earlier sensitivity test found) but
+inflates S0's interval substantially. If so, the width of the R0 prior is a scientific assumption that
+must be argued for, not chosen for convenience.
+
+**Per-parameter contraction (1 - sd_post/sd_prior; 0 = the posterior is just the prior).** Age
+reporting offsets 0.91, reporting `c` 0.91, `S0` 0.89, season seeds 0.83, `phi` 0.80, season deviations
+0.61, `R0_s` 0.60. Note the trap: `c` and the deviations look sharply contracted yet their absolute
+level is not identified at all -- conditional precision and marginal precision are different questions
+and only the second is publishable.
+
+**Three code defects it exposed.**
+1. `comp_model_fit.R:28` and `:122` hard-code two baseline slots (`b_RespiCompass`, `b_ERVISS`)
+   regardless of which sources a country's seasons come from. ES and NO have ZERO ERVISS seasons, so
+   their `b_ERVISS` enters no likelihood term and carries no prior: zero curvature from either source,
+   the penalised Hessian is EXACTLY SINGULAR, and Laplace standard errors are impossible. Both needed
+   the slot detected and dropped by hand. Build the slots from the sources present.
+2. Where a source contributes ONE season its baseline is effectively free (data-only sd up to 2.1e3 on
+   the log scale). `b` is the only unpenalised parameter, so nothing catches it. CZ, IT, NL each have a
+   single ERVISS season. A weak prior on `b` would close this.
+3. PL (1 direction) and NL (2) have NEGATIVE likelihood curvature at the optimum. Legitimate rather
+   than a convergence failure -- the optimum minimises the PENALISED objective, so the prior may supply
+   the missing curvature -- but the prior is doing structural work there, and PL's `S0` inverse was
+   numerically degenerate as a result.
+
+**Visual summary.** Parameter scope map plus these results:
+https://claude.ai/code/artifact/f6fddc68-046e-4d18-9d75-ce896edaf16f
+
+## 2026-09-12 the working model: simpler, joint, and recovery-tested
+
+**Decision (owner).** This is the WORKING MODEL. More iterations are expected -- "this is how science
+works" -- but it is the base everything else builds on. Spain is included (the season cut moved from 6
+to 5, giving 12 countries, 86 country-seasons, 184 parameters). Uncertainty intervals are required
+output. The Kalman filter and the driver/subtype validation both WAIT.
+
+**What it is.** `code/07_joint_model/`, with the one-paragraph abstract and the full cut list in
+MODEL.md. A joint age- and vaccination-structured SIR over 12 countries and 8 seasons: transmissibility
+varies between seasons and is shared across countries; susceptibility varies between countries and is
+shared across their seasons; one global elderly susceptibility; reporting varies by country and age but
+not by season except for one shared season visibility constrained to average one; a free seed per
+country-season for arrival time; negative-binomial counts with a country dispersion.
+
+**What was dropped, and why it was defensible.** The Kalman filter, and with it the process noise and
+the initial covariance: measured on the pilot, the filter only behaved with both pinned, and with them
+pinned its optimum equalled the deterministic one in every parameter. Dropping it also freed the
+observation model from the Gaussian a Kalman update requires, which mattered because 29% of observed
+cells are exactly zero and the pilot's fitted dispersion put 15% of its predictive mass below zero.
+
+**Architecture.** The entire log-posterior is one C++ call, so R does no per-evaluation work (the pilot
+spent 42% of each objective in R glue and 28% building trajectories the optimiser discarded). No filter
+means no Jacobian, which is most of why the core is short. Fitting exploits separability: only 16 of 184
+parameters are shared across countries, so block coordinate descent optimises all 12 country blocks in
+parallel, then the shared block, then polishes jointly. 116 s for the full fit as first built, ~170 s
+once the multi-start and the flat-line protector were added (2026-09-13); the C++ is ~1750x the base-R
+reference it is tested against.
+
+**Two optimiser findings that cost real time.**
+1. Each country's local block has a SECOND, WRONG OPTIMUM: let the dispersion collapse and the negative
+   binomial becomes so diffuse that every curve fits, so nothing forces a wave and the country flat-lines.
+   The first joint fit lost the Netherlands that way. It is a LOCAL OPTIMUM, not a prior problem --
+   tightening the dispersion prior moved the failure to Poland instead. Fixed by multi-starting each
+   local block from three points; worth 406 nats of likelihood and took the unidentified directions from
+   9 to 0. A residual 1-2% per-country failure rate remains and must be checked for on every fit.
+2. Block coordinate descent leaves a slow tail when the shared and local blocks are correlated (about 2
+   nats per sweep at the cap). The joint polish recovers it (24-31 nats), so keep both stages. Measured
+   2026-09-14: the per-sweep gain decays geometrically at ratio ~0.91, so the tail after 15 sweeps
+   extrapolates to ~24 nats and the polish gained 31 -- the excess being cross-block curvature the
+   sweeps cannot see. So `converged` was redefined to mean all three stages succeeded and no country is
+   flat, with the sweep loop's own status reported separately: as "sweeps < max_sweeps" it read FALSE on
+   every real fit, and a flag that is always FALSE is a flag nobody reads.
+
+**Identifiability, measured.** Every parameter family contracts between 0.69 and 0.94 against its prior,
+so nothing in this model is a restatement of an assumption. Contrast the pilot, where susceptibility
+looked well determined only because it was borrowing the tight transmissibility prior.
+
+**The honest limitation.** Every country needs about 2.6x more observation noise than its own
+week-to-week scatter can explain (`jm_adequacy`, figure 08). That excess is the deterministic mean
+failing to follow the wave, written off as measurement error. It is the trigger condition for restoring
+the filter, and the filter should be judged on whether it CLOSES THAT GAP rather than on whether it
+moves the estimates. Stress-tested 2026-09-14 across 18 ways of measuring the scatter (smoothing window
+3/5/7 weeks, epidemic threshold 5/20/50 per 100 000, with and without the small-sample correction): the
+excess runs 2.13x-3.65x, so the reported 2.59x is the conservative end of the range rather than the
+flattering one, and the gap is not an artefact of the measurement choice.
+
+**What it learns, with intervals.** Season visibility spans 0.57-1.80 with non-overlapping intervals
+between the extreme seasons, while transmissibility spans 1.51-1.71 with intervals of about +/-0.09 that
+mostly overlap. So between-season differences in observed burden are mostly about how VISIBLE a season
+was, not how TRANSMISSIBLE it was. That is the pilot's Danish conclusion, now carried by 86 waves.
+Caveat to carry: season visibility is partly a residual absorber, so read it with the noise budget.
+
+**That conclusion survives removing the prior asymmetry (tested 2026-09-14).** The obvious objection is
+that the priors are asymmetric by construction -- `log R0 ~ N(log 1.5, 0.15)` against
+`delta ~ N(0, 0.5)` -- so the tight one could be manufacturing the narrow transmissibility spread. It
+is not. Refitting with the `R0_s` prior widened fourfold to 0.60 changes its fitted sd(log) from 0.036
+to 0.037; refitting with BOTH priors at 0.50 gives 0.037 against visibility's 0.377. Visibility varies
+about ten times as much under every setting. What the prior does control is the LEVEL: widening it moved
+the fitted `R0_s` range from 1.51-1.71 to 1.54-1.76. **Report the spread as a finding, the level as
+prior-informed.**
+
+**Recovery.** See MODEL.md for the numbers. Headline: the publishable quantities recover (rank 0.95-0.97,
+coverage 96% median), the intervals are conditional on the optimiser finding the right basin (coverage
+falls to 25-79% when truth is drawn from the priors), and the learning layer's two-step procedure is
+UNBIASED, so driver slopes can be read at face value.
+
+**But a recovery test that cannot fail certifies nothing (added 2026-09-14).** All of the above simulates
+from the model's OWN parameter space, so it asks whether the optimiser works, never whether the model's
+assumptions hold. Adding arms that simulate from truths the model cannot represent
+(`jm_simulate_violation`, `jm_misspecification_check`) changed the reading of the whole recovery result:
+
+| arm | R0 rank | visibility rank | **S0 rank** | noise excess |
+|---|---|---|---|---|
+| control (representable) | 1.00 | 0.96 | **0.97** | 1.25x |
+| per-country R0, sd(log) 0.10 | 0.95 | 0.96 | **0.09** | 1.26x |
+| a second wave the SIR cannot make | 0.93 | 0.96 | **0.99** | 1.24x |
+
+**The decision this forces.** Sharing `R0_s` across countries is what makes `S0_c` identifiable -- that
+was the design's central win over the pilot (a 50-fold sharpening). The violation arm shows the same
+mechanism is its central risk: a country's true transmissibility deviation has nowhere to go but into
+its `S0_c`, so if the sharing is false the susceptibility ranking degrades to noise. A 10% spread is
+plausible. So `S0_c` rankings are to be reported as CONDITIONAL ON SHARED TRANSMISSIBILITY, and the first
+job of the learning layer is the model comparison that tests it: fit a per-country `R0` multiplier as an
+alternative and compare by likelihood.
+
+**And a caution about designing such arms.** The first attempt at a violation multiplied each country's
+expected counts by a constant. That is precisely what the per-country reporting level `c` does, so the
+model absorbed it exactly and the arm scored BETTER than the control while appearing to test the sharing
+assumption. A violation is only a violation if no parameter can reparameterise it away;
+`jm_violation_is_real` checks that the perturbation varies WITHIN a country-season, and the test suite
+enforces it on every arm.
+
+**Second reading of the noise gap.** A spurious 60% late wave in every season moved the noise excess from
+1.25x to 1.24x, i.e. not at all. So the noise budget is a weak misfit detector, and the real-data 2.59x
+cannot be a missed secondary wave -- it must be pervasive week-to-week wander across the whole season.
+That is what process noise describes, which sharpens the filter's job: it should close a gap of that
+SHAPE, and the innovation diagnostics should be checked against week-to-week wander rather than against
+episodic misfit.
+
+**The recovery harness is built to carry the learning layer.** `jm_truth_with_driver` constructs a world
+where a covariate really moves the season parameters by a known amount, and `jm_driver_recovery` runs the
+fit-then-regress step and checks the slope comes back. Any driver association found in real data can
+therefore be told apart from one manufactured by the procedure, before it is ever claimed.
+
+## 2026-09-16 -- the data layer audited, and what it means for reading the output
+
+The model code had been audited from six angles; the DATA LAYER under it never had. A fan-out audit got
+through two dimensions before the compute budget ran out, and every one of its independent verifiers
+died with it, so the findings below were re-verified by hand before being acted on.
+
+**The reassuring half, and it is the larger half.** All 86 country-season observation matrices rebuild
+EXACTLY from the raw streams by independent code (max count difference 0, max rate difference 2e-16);
+the three age bands map from the four source bands with none dropped or double-counted; the populations
+used for the band merge and for the count conversion agree to the person and sum to the national total;
+missing cells are genuinely NA and the likelihood skips exactly those; `lgamma_y1` sums over exactly
+the cells the C++ skips; season boundaries are the documented 1 August with no ISO-week straddle; the
+committed panel reproduces the live stitch exactly; and the whole data object is reproducible field for
+field. 37 such checks came back clean. **The data object is what it says it is.**
+
+**What was wrong, and is now fixed.**
+
+1. **`jm_build_data`'s `min_seasons` default was still 6**, the value the 2026-09-12 decision replaced
+   with 5. Only the runner passed the override, so any other caller reproducing "the model" as the
+   documents describe it silently got an 11-country / 81-country-season / **173**-parameter design
+   instead of 12 / 86 / **184** -- announced by one line of verbose output. The shipped fit was never
+   affected (the 5-season design is field-for-field identical to the cached `d`); the DEFAULT was
+   stale. Now 5, with a test pinning 12 / 86 / 184 for the real candidate list. No small test design
+   exercised the default, which is why nothing caught it.
+2. **The attack rate was a window quantity reported as a season quantity.** `n_weeks` doubled as the
+   integration horizon, so each country-season's epidemic was integrated only as far as that country's
+   surveillance series happened to run (33 to 53 weeks). Five of 86 cells moved by more than 5% and
+   IT 2015/2016 by **15%** (window 38 weeks) purely from data availability -- in a quantity figure 14
+   calls reporting-free and invites comparison with cohort evidence. The dynamics now run to a fixed
+   53-week horizon everywhere while only the observed weeks feed the likelihood, so the negative
+   log-likelihood is unchanged to the last bit (verified) and the attack rate is comparable across
+   cells. The flat-line reference minimum moves from 0.27 to 0.30; the 0.03 threshold is unaffected.
+3. **An unresolved season or source label would have killed the R process.** `cs_season` and `cs_src`
+   come from `match() - 1L`, and `srcs` is built with `sort(unique(...))` which DROPS NA -- so one
+   unmatched source label yields `NA_integer_`, which the C++ uses as a raw index (`logb[INT_MIN]`).
+   The process dies with "an irrecoverable exception occurred", losing the fit and reporting nothing
+   about the cause. Unreachable from the committed panel, so this guards a future panel build. Now a
+   `stopifnot` in R with a message naming the offending vector.
+4. **The two settings files could silently disagree about the rate basis.** `d$y` is built with
+   `comp_model_settings()` while `d$rate_per` is stored from `jm_settings()`; they agreed only by
+   coincidence. Passing `rate_per = 1e6` to `jm_settings()` left the counts unchanged but made every
+   per-100k conversion 10x too large and silently rescaled every fitted baseline. Now an assertion.
+5. **The documented vaccination fallback did not exist.** `ext = ... else c()` made `ext` NULL, so
+   `is.na(ext[s])` was `logical(0)` and the four-step ladder raised "argument is of length zero" for
+   every country whenever the external CSV was absent -- which also fires from any working directory
+   but the repo root. Both paths are `here::here()` now and the ladder degrades as documented. And
+   `jm_build_data` reported every failure as "(no data)", the one explanation it cannot be; it now
+   prints the caught message.
+6. **The rationale for `b` per source was contradicted by the data.** See the corrected entry above.
+
+**What is a caveat rather than a bug, and now travels with the output.**
+
+- **`2025/2026` rests on 7 of 12 countries**, on 34-41-week grids against 52-53 elsewhere, with 774
+  observed cells against 1497 for 2023/2024 -- and it carries the HIGHEST fitted `R0` (1.71). The
+  sum-to-zero constraint on the season deviations treats it as one of eight equals.
+  `jm_summary_season` now reports `n_country`, `obs_cells` and the grid range next to `R0`.
+- **Norway is fitted on the EU-average contact matrix** (it has none of its own). Its age offsets are
+  the parameters most sensitive to the mixing pattern -- re-optimising its block under neighbours'
+  matrices moves the elderly offset by up to 66% for a likelihood spread of 0.7 nats -- and its
+  `rel_young` of 0.385 is the most extreme value in the country table. `d$contact_source` and
+  `summary_country.csv` now name each country's matrix.
+- **8 of 86 country-seasons take 3-14 weeks from the other source** while labelled with one, mostly in
+  the late off-season tail where the baseline is essentially the whole model mean. The stitch documents
+  the per-week rule; the consequence for `b` is now documented too.
+- **The twelve countries are a deliberate selection.** Iceland, Malta and Austria meet the design's own
+  inclusion rule and were never offered to it. Since sharing `R0_s` across the design's countries is
+  what identifies `S0_c`, membership is substantive.
+
+**Open, needing an owner decision.** The raw ERVISS file encodes a zero-detection week two ways: 2083
+weeks say `detections = 0` explicitly, and 271 weeks report `tests > 0` with the detections row simply
+absent. The code reads the first as an observed zero and the second as missing, and because the panel's
+grid ends at the last finite week, a run of such weeks at the end of a season SHORTENS it rather than
+leaving holes. This costs 110 panel weeks, 18 inside fitted country-seasons, and truncates CZ 2024/2025
+at week 36 -- so CZ's `b_ERVISS` is reported as an off-season floor estimated from a series with no
+off-season. **Is an omitted detections row zero detections, or unknown?** Reading it as zero recovers
+the weeks; keeping it missing needs the grid to stop shortening silently and the dropped count reported
+per country-season. Not decided unilaterally because it changes what the model is fitted to.
+
+**Still un-audited** (the fan-out died before reaching them): the settings and priors against the
+documents, the vaccination pulse and contact-matrix mechanics inside the C++, the Euler integrator's
+accuracy and edge behaviour, the internals of the identifiability and adequacy diagnostics, the
+starting values, and end-to-end reproducibility and determinism.
+
+### 2026-09-16 (later the same day) -- the positivity-encoding question, and the provisional exclusion
+
+**Owner decision:** exclude the affected country-seasons for now, and record that the question needs
+confirmation by surveillance colleagues.
+
+**Scope, measured before acting** (the first report said "only CZ"; that was not right).
+- Raw ERVISS typing files encode a week with no influenza detections two ways: **3151 weeks say
+  `detections = 0` explicitly** (2083 sentinel, 1068 non-sentinel) and **709 weeks report `tests > 0`
+  with the detections row absent** (271 sentinel, **438 non-sentinel** -- the non-sentinel stream is
+  the worse one, and it is the stream HR, IS, MT, RO, LV and FI use). No published positivity value
+  rescues any of the 709.
+- Judged on the stream each country's own ILI+ is built from, the encoding affects **301 weeks in 34
+  country-seasons across 12 countries**: AT, BG, CZ, HU, IS, IT, LT, LV, MT, PL, RO, SK.
+- Of those, **2 of the 86 fitted country-seasons**: **CZ 2024/2025** (17 weeks, season weeks 34-52 --
+  trailing, so it had truncated the season to 36 weeks against 41-53 for CZ's other seasons, leaving
+  no off-season in it at all) and **PL 2024/2025** (1 week, season week 4 -- interior, a hole rather
+  than a truncation).
+
+**What the exclusion costs.** 12 countries and 8 seasons all survive; the design goes from 86
+country-seasons / 184 parameters to **85 / 182** (the first pass dropped PL 2024/2025 too, on a
+count-based rule; the evidence-based rule below keeps it). CZ additionally loses its ERVISS baseline slot,
+because 2024/2025 was CZ's only ERVISS season -- which is the right outcome, since that slot was
+otherwise being fitted with no off-season behind it (the defect the audit flagged). 2024/2025 now rests
+on 8 countries rather than 10.
+
+**A judgement call left visible.** Excluding PL 2024/2025 costs a whole season for ONE interior missing
+week. `ambiguous_min_weeks = 2` keeps it (85 country-seasons / 182 parameters) and drops only CZ. The
+default is the strict reading of the instruction; the parameter is there because the two cases are not
+really alike.
+
+**Implementation.** `erviss_encoding_ambiguous()` in `stitch_iliplus.R` derives the affected list from
+`models_in` (a pure function -- verified to reproduce the raw-file counts exactly), and `jm_build_data`
+prunes those country-seasons in the SAME pass as the no-observation prune, before `n_local` and
+`off_country` are computed, so no orphaned seed or baseline slot can survive. `d$excluded_ambiguous`
+records what went and why. Both designs -- with and without the exclusion -- are pinned by tests,
+including that no excluded country-season reaches the fitted design and that the layout stays exact.
+
+**If the answer is "an absent row means zero detections"** (which the 3151 explicit zeros make
+plausible) the right fix is upstream in `gen_model_input.R` -- read the absent row as 0 -- and these
+exclusions should be reverted, recovering 110 panel weeks and 2 fitted country-seasons. **If it means
+the count is genuinely unpublished**, the exclusion stays, and the separate defect of a trailing run
+shortening the grid rather than leaving holes should also be fixed. Either way this is a question about
+what ECDC's publication format means, not about our code.
+
+**Which reading is more plausible? (analysed 2026-09-16, owner's question)** Four tests on the
+surrounding time series, and they do NOT agree across cases.
+
+1. **Omission is not the format's encoding for zero.** 18 of 30 countries have ZERO absent rows and
+   write explicit zeros throughout; only IT and MT omit without ever writing a zero; ten countries do
+   both (CZ: 79 explicit zeros AND 30 absent rows; PL: 136 and 1). So an absent row is a
+   country-and-period reporting lapse, not a documented convention -- which argues against a blanket
+   "absent = 0" rule.
+2. **Absent weeks are not preferentially off-season**: median season week 19, 32% at week 40+, against
+   24 and 37% for explicit zeros.
+3. **Binomial plausibility.** P(0 detections | that week's tests, local positivity from published weeks
+   within +/-3 weeks) is >= 0.05 for 82% of the 177 absent weeks with usable neighbours, against 96%
+   for genuine explicit zeros. So absent weeks are measurably LESS consistent with being true zeros
+   than real zeros are; 10 are essentially impossible as zeros.
+4. **The two fitted cases differ in kind.**
+   - PL 2024/2025 week 3: 13 tests, neighbours 0 detections over 114 tests, P(0) = 1.000. Zero is
+     overwhelmingly plausible -- a one-off gap in a quiet pre-season week.
+   - CZ 2024/2025: week 34 has 56 tests against 7.3% local positivity (~4 detections expected),
+     P(0) = 0.014; weeks 37-39 are plausible; weeks 40-52 have no published neighbour at all, because
+     CZ's detections feed went dark from 2025-03-26 and resumed only in the next season. "Unknown"
+     fits CZ.
+
+**Consequence.** Keep CZ 2024/2025 excluded. PL 2024/2025 is a false positive of a count-based rule
+(`ambiguous_min_weeks = 2` recovers it). The rule the evidence actually supports is
+per-week-on-the-evidence -- treat an absent row as zero where the local positivity makes zero plausible,
+as missing otherwise -- rather than per-season-on-a-count. That is still a guess about a publication
+format, so the question for surveillance colleagues stands unchanged.
+
+## 2026-09-16 (final) -- the six remaining audit dimensions: the foundations hold
+
+The fan-out had died on a spend limit after two of eight dimensions. The remaining six were audited by
+hand. **They came back essentially clean** -- 40 checks passed, one documentation gap, and two of my own
+test designs were wrong rather than the code.
+
+**Verified correct, with the number that shows it.**
+- *Settings and priors.* gamma = 1/3.6 exactly; ve_inf/ve_ili/ve_spread = 0.25/0.20/0.20; vax_day = 62;
+  rate_per = 1e5 -- all matching the documents. **Every one of the 46 slots has a proper informative
+  prior**: log-prior curvature is strictly negative in every coordinate and equals `-1/sd^2` for the
+  declared sd, slot by slot. **The shared priors are counted exactly once**, not once per country --
+  `negll - sum(country negll)` equals the shared prior term to 1e-8, which matters because the block
+  sweep decomposes the likelihood 12 ways. The contraction denominator is the prior sd the C++ applies,
+  for all 9 families.
+- *Vaccination and the contact matrix.* Every country's matrix has spectral radius 1 to 1e-15; the
+  matrices genuinely differ between countries; population is conserved per age group over a whole
+  season to 7e-16; no compartment goes negative; only the 65+ group is vaccinated, once, and
+  vaccinating reduces the elderly attack rate (DK 2014/2015: 0.256 -> 0.209 at 45% coverage).
+- *The integrator.* Against a 24x finer grid at the fitted parameters on the largest wave: peak +1.2%,
+  attack rate +0.9%, peak timing within one week. **The pool cap never binds** in any of the 85
+  country-seasons at the optimum, so the dynamics are the stated SIR everywhere it matters. The
+  objective stays finite at R0 near 1, R0 = 6, S0 -> 0, S0 -> 1 and a 1e-30 seed.
+- *The diagnostics.* The likelihood-only Hessian is genuinely prior-free (built from `jm_loglik_cpp`);
+  sd_post is the marginal sd as figure 15 claims; `excess` is exactly `cv_fitted / cv_data` on one cell
+  set. **And the noise floor is unbiased**: simulating negative-binomial series of known dispersion on
+  realistic wave shapes recovers the true CV to within 2% at every wave width tested, so the 2.6x
+  excess is NOT an artefact of the estimator. The `sqrt(2/3)` factor in `jm_phi_data` is the correct
+  independence correction for a centred 3-week mean, and it is doing its job.
+- *Starting values.* All 12 single-country designs build with a finite start; 2- and 4-country designs
+  have `length(theta0) == n_par` with blocks partitioning exactly; the start differs between real and
+  simulated data, so the recovery harness gets no help from the real series.
+- *Reproducibility.* Two identical fits give bit-identical theta; **the core count does not change the
+  answer** (max |diff| 0.0 between 1 and 2 cores), so no parallel stage draws random numbers; the data
+  object is reproducible field for field; and every design number MODEL.md quotes matches the artefact.
+
+**The one gap, fixed.** MODEL.md did not state that the elderly susceptibility re-weights the contact
+matrix and the result is **rescaled again** to spectral radius 1. This is a real assumption with a real
+consequence: `sigma_eld` redistributes *who* gets infected without changing *how transmissible* the
+season is, so `R0_s` keeps its meaning whatever `sigma_eld` is -- and `sigma_eld` is identified by the
+AGE COMPOSITION of cases, not by the size of the wave. It was documented only in the pilot's
+ASSUMPTIONS.md (C3). Now in the working model's own abstract and in its fixed-values list, and asserted
+by a test at three values of `sigma_eld`.
+
+**Two of my own checks were wrong, and the method matters.** A "moving-average leakage" finding
+evaporated once I applied the `sqrt(2/3)` correction the code already applies -- the estimator is fine
+and my test had omitted it. An "unpenalised seed" finding evaporated once I stopped testing a single
+direction: `theta0`'s seeds sit BELOW their prior mean, so a `+8` move goes toward it and the prior
+improves. Both were replaced by direction-free tests of the actual claim (curvature, and a simulation
+against known dispersion). **A finding that survives only one way of looking at it is not a finding.**
+
+**Kept as invariants.** Five new tests: shared priors counted once; every slot properly penalised by
+curvature; sigma redistributing without changing transmissibility; the noise floor unbiased against a
+known dispersion; determinism across core counts.
+
+**Operational note.** Long R runs are unreliable in this container -- the 12-country Hessian stage and
+a 4-replicate recovery run were both killed part-way. The fit (120 s) and the Hessians (314 s) complete
+when run alone; budget accordingly and re-run rather than trusting a partial artefact.
+
+## 2026-09-25 -- R0 fixed; susceptibility and reporting each get a season AND a country effect
+
+**Owner decision.** `R0` is fixed at 1.5, not fitted: transmissibility and susceptibility enter the
+rise rate as a product and are indistinguishable from one wave, so one of them is pinned and `S0`
+becomes the single sensor of how easily a season spread. `S0` then carries both a country level and a
+season effect: `logit S0_{c,s} = S0_c + x_s`, with `x_s` centred on zero and constrained to average
+zero. Reporting keeps the same structure it already had: `log c_{c,s} = c_c + delta_s`. The age
+effects are unchanged.
+
+**Why the mean lives in the country level rather than in a separate slot.** The owner's
+`mean + x[season] + y[country]` with both centred on zero is equivalent to a country level whose prior
+is centred on the plausible value (`qlogis(0.75)` for `S0`, `log 0.05` for `c`) plus a zero-centred
+season effect. Keeping it that way, with no sum-to-zero across countries, preserves the block
+separability of the likelihood -- each country's block stays independent given the shared block --
+which is what makes the fit run in two minutes. Same identification, one fewer constraint to carry.
+
+**What this returns to.** The project's founding decision (top of this file) was exactly this: fix R0
+from the literature, fit S0 per season. The joint model had moved the season effect into a fitted
+`R0_s` because sharing it across countries was what made a per-country `S0_c` identifiable. Fixing R0
+outright achieves the same identification more simply -- with R0 pinned, the rise rate is `S0`'s
+alone to explain -- at the price the founding decision already accepted: any real transmissibility
+variation, between seasons (subtype) or between countries (demography, mixing), is absorbed into `S0`
+as "more susceptible". `S0_c` and `x_s` are composite indices of how easily influenza spread, and
+MODEL.md now says so in its own section on what the contact matrix and the pyramid do and do not do.
+
+**What changed in the code.** Shared block is now `x_s` (S-1 free), `delta_s` (S-1 free),
+`log2 sigma_eld`: 15 slots, one fewer than before. `d$R0_fixed` replaces the `log_R0_s` block and its
+prior; `pr_x_sd = 0.5` on the logit scale is the season-effect prior. `jm_intervals` now derives both
+constrained last members by the delta method. The recovery harness's driver hook moves `x_s` instead
+of `log R0_s`; the `r0_by_country` violation scales the fixed R0 per country, which now measures
+directly how far `S0_c` is a composite. The C++ and the base-R reference still agree to 1e-10. Design:
+12 countries, 8 seasons, 85 country-seasons, **181 parameters** (183 without the positivity exclusion).
+
+**Identifiability, the theory (the data side is in MODEL.md).** With R0 fixed, each wave's rise rate
+`gamma (R0 S0 - 1)` identifies `S0_{c,s}` outright; its final size then follows from `S0_{c,s}`, so the
+peak height identifies `c_{c,s}`; the seed identifies timing. The two-way decompositions are ordinary
+additive designs on 85 cells with 7 + 12 free effects each -- 66 residual degrees of freedom, well
+identified. The one question the design has to answer from shape alone is "a bigger season: more
+susceptible or more visible?", and it can: a susceptibility effect makes the wave rise faster and peak
+earlier, a visibility effect scales it. The exact tie that remains is `c_c x delta_s`, broken by the
+average-one constraint, not by the data.
+
+**The data side, measured (same day).** Every family contracts by 0.69-0.95, `x_s` by 0.93. The
+posterior correlation between the two season effects in the same season is 0.27 (max 0.31), so
+"more susceptible or more visible" IS answered by the data, as the theory says it can be. Country
+level and reporting level correlate 0.26 in magnitude. Fitted `S0_{c,s}` tracks the observed early
+growth rate (Spearman 0.54 over 83 waves). The misspecification arms give the same picture as under
+the previous model -- a true 10% between-country R0 spread takes the country ranking from 0.93 to
+0.01, the season effects survive, the noise budget is blind -- now as the design's stated caveat.
+
+**The model comparison, reported against the decision.** On the same 85-cell design and likelihood,
+the previous model (`R0_s` fitted per season, `S0_c` per country; 182 parameters) has log-likelihood
+-50786.68 and this one (R0 fixed, `S0_c + x_s`; 181) has -50798.59: **11.9 nats in favour of the
+fitted-R0 model, AIC +21.8 against this one.** Not nested, so a likelihood comparison, not a test.
+What it says: the data prefer season-to-season variation that changes how *fast* a wave rises without
+changing how *many* are left to infect. A season effect on `S0` changes both. That is a real piece of
+learning about where season variation lives, and it is what the learning layer should pick up: the
+two parameterisations are two hypotheses, and this is the first comparison between them. The
+fixed-R0 model stays the working model by decision -- its identifiability story is cleaner and its
+S0 is the project's sensor -- with this result recorded rather than buried.
+
+**Two things the reparameterisation did NOT change.** The country ranking (only BE/DK and NL/NO,
+each within 0.001, swapped places) and 2025/2026 as the outlying season (highest `x_s`, as it was
+highest `R0_s`). Every `S0_c` moved up -- HR from 0.93 to 0.97, EE from 0.75 to 0.80 -- because a
+fixed R0 of 1.5 is below the 1.51-1.71 the seasons had been fitting, and a lower R0 forces a higher
+S0 to match the same rise rate: the founding caveat, observed.
+
+### 2026-09-25 (later the same day) -- `S0` or `R0`: the proper comparison, and what it actually found
+
+**Owner request.** A proper model comparison between sensing season and country effects with `S0`
+and sensing them with `R0`, using only methods suitable for time series whose weekly observations are
+not independent. Full numbers and tables in MODEL.md ("Where does the variation live"); figure 17.
+
+**How.** One layout, a switch per effect (`season_on`, `country_on` in {`S0`, `R0`}), four models of
+181 parameters on the same 85 cells and likelihood. The unit of inference is the wave: per-wave
+paired log-likelihood differences, sign test, Wilcoxon, cluster bootstrap by wave / country /
+season. Raw nats and AIC are reported but flagged: residual lag-1 autocorrelation inside waves is
+0.21, so they overstate by about a third.
+
+**Result.** Raw likelihood favours either `R0` lever by 10-12 nats (both together: no more). With the
+wave as the unit there is no preference: 37-39 of 85 waves favour `R0` (sign test p 0.28-0.52,
+Wilcoxon 0.61-0.67), every bootstrap interval on the total spans zero widely, and the typical wave
+prefers `S0`. The raw gap sits in Croatia and 2025/2026 alone -- exactly the cells where the working
+model's `S0` presses its ceiling of 1 at `R0 = 1.5` (8 of 85 cells above 0.95). Re-pinning `R0 = 1.7`
+inside the working model recovers 95% of the gap with the country ranking preserved (Spearman 0.99).
+
+**Decision.** The working model stays `S0/S0`: the data do not distinguish the mechanisms, and the
+`S0` reading is the project's sensor. The abstract's earlier sentence that the fitted-R0 model "fits
+11.9 nats better, AIC +21.8" is withdrawn as a claim about evidence -- it was the raw number, and the
+wave-level analysis shows it is not evidence of a mechanism but of a ceiling. **Open for the owner:**
+whether to raise the pin to 1.7 (no cell then above 0.90; every `S0_c` moves down, Croatia 0.97 to
+0.86; ranking unchanged). Until decided, `R0 = 1.5` stands and the 8 ceiling cells are a stated caveat.
+
+**A hole this comparison exposed, closed.** The first `R0 = 1.6` refit returned a log-likelihood of
++3e6: one country's `log phi` ran to 44.7, where `lgamma(y + phi) - lgamma(phi)` is catastrophic
+cancellation. The C++ and its base-R mirror share the formula, so the identity test that guards the
+likelihood could not see it. Now `phi > 1e8` is rejected in both (a sentinel, never scored), and a
+new test compares the likelihood against R's `dnbinom` -- an independent third implementation --
+across the legitimate range and checks the rejection at every entry point. `jm_fitted_cpp` also now
+stops on a rejected country instead of indexing an empty result. No earlier fit was in that region
+(fitted `phi` 0.15-1.8, prior centre 4), so no reported number changes.
+
+## 2026-09-26 -- R0 fixed by judgement; S0 is a blunt sensor; the switch removed
+
+**Owner decision.** The comparison showed the data cannot tell a season or country effect on `S0`
+from one on `R0`. Where the data cannot decide, an informed judgement is imposed instead: **R0 is
+fixed, and `S0` is a blunt sensor of susceptibility and infectivity together.** `S0_c` and `x_s` are
+read as "how easily influenza spread here / this season", never as immunity alone.
+
+**What changed in the code.** The sensing switch (`season_on`, `country_on`, `S0_fixed`, the R0-side
+priors `pr_R0c_*` and `pr_r_sd`, the `r_` / `:log_R0` names, `R0_season`, `R0_typical`) is removed
+from the C++, the base-R mirror, the recovery harness and the report writer, and the three comparison
+scripts are deleted. No parameter carries R0; the likelihood reads `d$R0_fixed`, which a new test
+checks in both implementations. The working model's numbers are unchanged: the switch's default
+already was this model. The comparison stays reproducible from commit `7b04681`.
+
+**Still open.** The pin value. At 1.5 the sensor saturates (`S0` above 0.95) in 8 of 85 cells; 1.7
+frees them all with the country ranking unchanged. 1.5 stands until the owner decides.
+
+## 2026-09-26 -- spatial spread tau: implemented, a shared tau adopted, a per-country tau tested and not adopted
+
+**Owner request.** Burden waves spread through a country at slightly different times because of its
+city structure: copy the wave several times with normal weights, ideally with one parameter for how
+fat the wave gets. Implement it, check that tau = 0 reproduces the current fit, then test tau by
+country, then discuss identifiability again, since tau, R0 and S0 all govern how fat a wave is.
+
+**What was built.** The national incidence is the local epidemic convolved, on the daily grid and
+before the weekly aggregation, with a normal kernel of sd tau days. `log tau ~ N(log 7, 0.7)`; one tau
+shared (default) or one per country (`tau_by_country = TRUE`). Exactly preserved: the total, the mean
+timing and every exponential rate (rise and decline); the variance grows by tau^2 + 1/12 day^2. Below
+0.05 days the original code path runs: against the pre-extension engine the fitted means are
+bit-identical in all 85 country-seasons and the log-likelihood identical to 0.000 nats, and a refit
+with tau pinned at 0 lands on the old optimum. The C++ and the base-R reference compute the spread two
+different ways and agree to 1e-14. `run_tau_analysis.R` reproduces every number below; figure 18.
+
+**Results.**
+- A shared tau goes to 2.1 days and gains nothing (-0.08 nats); the profile rejects a week or more
+  (-6.4 nats at 7, -107 at 14). It is not the S0 ceiling: at R0 = 1.7 it again settles at 2.3 days.
+  The estimate runs LOW: a true week of spread comes back as about 3 days in three of three
+  simulations, two weeks as about 10, with S0 pushed down each time. That is the likelihood's own
+  ridge, not the priors (on a 7-day data set the likelihood prefers 3 days by 0.64 nats; a threefold
+  weaker S0 prior changes nothing). So "2.1 days" reads as "a few days at most", not "none".
+- Tau by country: five starts, one optimum; +52.7 nats over the shared tau with 11 more parameters,
+  but 49 of 85 waves agree (sign p 0.19, Wilcoxon 0.17). On simulated data with a real big-versus-small
+  difference the same test finds it easily (57 of 85, p = 0.002) for only +12 nats: the real gain is
+  large but lumpy, the signature of absorbing wave-specific misfit. Six countries want spread (PL, EE,
+  NO, FR, DK, IT), six do not; size does not predict which (rank correlation 0.03); Estonia's 36 days
+  fits the noisiest series in the panel.
+- Within a country tau and S0 lie on a ridge (posterior correlation 0.70-0.90 where tau is used); with
+  tau by country the S0 country ranking moves (0.80 against no spread) and, in recovery, is recovered
+  at 0.69 instead of 0.94-0.99. Season effects keep their pattern (0.98; the 2025/26 magnitude does not).
+- R0 and S0 are exactly exchangeable -- (k R0, S0/k, I0/k, k c) reproduces every expected count to
+  7e-14 -- so the R0 pin reaches the data only through S0 <= 1; at R0 = 1.7 every S0 scales by 0.88 and
+  no tau moves.
+
+**Decision (made here, reversible by one setting).** The working model keeps one shared tau: it is
+what the owner asked for, it costs nothing in the conclusions, and it now reports a finding (no common
+spread of a week or more). Tau by country is recorded as tested and not adopted: its gain is not
+consistent across waves, its values are not geography, and it costs S0's country ranking its
+identifiability. **For the owner:** a per-country spread becomes identifiable with outside information
+on how dispersed the regional peak times are within each country, used as a prior on each tau.
+
+## 2026-09-26 (later) -- the wave's fatness fixed; S0 also carries spatial structure; the R0 pin assessed
+
+**Owner decision.** A fatness parameter clearly interferes with S0, so the spatial spread is FIXED, not
+fitted, and S0 is acknowledged to capture a country's spatial structure too: the overlay of its local
+waves, which makes the national wave fatter than one well-mixed epidemic. Fixed at none
+(`tau_fixed = 0`): a fitted shared spread settled at about two days and changed nothing (S0 rank
+correlation 1.00 with no spread), so zero costs nothing measurable and says plainly that the model does
+not describe spread.
+
+**What changed in the code.** The fitted-tau slots (shared and per country), their priors and the
+`tau_by_country` switch are gone; `tau_fixed` (days, default 0, validated to 0-120) is read by the C++
+and the base-R reference alike. The spread kernel stays, for a fixed value set from outside information
+on regional peak timing; its exact properties (total, mean timing and both exponential rates kept; the
+variance grows by tau^2 + 1/12) stay under test. Back to 181 parameters: the pre-tau working fit
+evaluates to the identical log-likelihood under the new code (difference 0.0), and the refit converges
+to the same optimum. `run_tau_analysis.R` and `plot_tau_analysis.R` are removed with the fitted slots;
+the fitted-spread analysis and figure 18 are reproducible from commit `c9286b7`. Figure captions now
+read the pin and the spread from the fit instead of hard-coding them.
+
+**The R0 pin, assessed (owner asked: 1.7 or higher, now that the model is a sensor of shapes).**
+`run_pin_sweep.R` refits the working model at R0 = 1.5, 1.7, 2.0, 2.5 and 3.0, the S0 prior centre
+moving with the pin so the prior sits on the same R0 x S0. Findings (tables in MODEL.md, "The R0 pin"):
+- Off the ceiling the pin changes nothing relative: from 1.7 up the fit is flat within 2 nats, the
+  country S0 ranking holds at 0.99, the season effects correlate at 0.996 or more, visibility at 0.998.
+  No pin differs from 1.5 with the wave as the unit (sign test p 0.39-1.0).
+- 1.5 differs only through the ceiling: 8 cells above 0.95, 2025/26 compressed.
+- The pin sets the absolute scale only: the median attack rate is 32% at 1.5, 28% at 1.7, 24% at 2.0,
+  19% at 2.5, 16% at 3.0 (as 1/R0), and the reporting fraction rises as R0. R0 x S0 stays at 1.29, where
+  a systematic review puts seasonal influenza's reproduction number (1.28).
+
+**Recommendation to the owner (not yet applied).** Raise the pin to **2.0**, with the S0 prior centre
+moved to 0.5625 (= 0.75 x 1.5/2.0). 1.7 is the minimum that clears the ceiling, but its largest S0 is
+already 0.90: a season more extreme than 2025/26 would press the ceiling again, while 2.0 leaves room
+(largest S0 0.78) at no cost to any relative result. Going higher changes only the absolute scale;
+2.5 would bring the model's attack rate to about one in five, the order serological cohorts report
+per season, but the homogeneous SIR's final size is the least trustworthy number a shape sensor
+produces, so the pin should not be tuned to it. With S0 read as a sensor of the wave's shape, any pin
+from 1.7 up is a choice of units for S0; 2.0 is the choice that keeps the sensor off its stop.
+
+## 2026-09-26 (late) -- R0 = 2.0 applied, checked, and the documentation rebuilt for reflection
+
+**Owner decision: R0 = 2.0.** Applied as recommended (previous entry). Three things changed with it:
+- **The S0 prior is placed on R0 x S0.** `pr_Reff0_mean = 1.125` replaces `pr_S0_mean`, and
+  `jm_build_data` sets `pr_S0_mean = qlogis(1.125 / R0)` (0.5625 at 2.0). Only the product reaches the
+  data, so the prior belongs on it; a future change of pin now moves the prior with it instead of
+  silently leaving it at the old product.
+- **The starting values follow the pin.** `jm_theta0` started every country at S0 = 0.8, which at R0 =
+  2.0 is a wave growing implausibly fast; it now starts at R0 x S0 = 1.2 whatever the pin. Checked: the
+  working fit from the new start and the sweep's fit from the old one reach the same optimum to 0.000
+  nats.
+- **What the pin sets is said where it is shown.** Figures 12 and 14 claimed an absolute reporting
+  fraction and an attack rate "free of reporting" to compare with cohort studies; both levels are set
+  by the pin (as R0 and as 1/R0), so their captions now say so and compute the alternative levels from
+  the fit. Four captions still described the per-season R0 of an earlier model; corrected.
+
+**The check.** Refit: converged, no flat country, penalised Hessian positive definite, no direction the
+data cannot see; contraction 0.70-0.98 (S0 better determined than at 1.5: 0.98 and 0.97 against 0.95
+and 0.93, because the logit scale is no longer compressed near 1). Full test suite: one stale test
+found -- it wrote log(R0) into the slots that became the season effects on S0 at the fixed-R0 change,
+so it tested the wrong thing and passed by luck until the new starting values exposed it; rewritten to
+raise the pinned R0 itself. Every other positional write in the tests was audited against the layout.
+Recovery, prior stress test and figure-by-figure review: see MODEL.md sections 5-6.
+
+**A pattern found in the check, for the owner.** The country ranking of S0 follows data quality: its
+rank correlation with each country's dispersion is 0.75, and the three noisiest series (PL, NL, EE)
+carry three of the four lowest S0. The recovery study rules out the estimator as its cause: on data
+simulated from the fit, the noisy countries' S0 comes back slightly HIGH (less than 0.01 logit), not
+low. So the association is in the data or in misfit the simulation lacks -- open, and a reason to read
+the bottom of the country ranking with care.
+
+**Recovery of this model** (first run since R0 was fixed; MODEL.md section 6, figure 16): local, 8
+replicates -- country S0 ranking 0.97, season effects 0.98 (Pearson), visibility 1.00, coverage 97%;
+prior-space, 4 -- rankings 1.00, coverage 83-96% for most families (elderly susceptibility 1 of 4);
+driver, 6 -- a known effect on both season effects comes back unbiased (0.240 for 0.25, 0.346 for
+0.35); misspecification -- a 10% between-country R0 spread takes the country S0 ranking to 0.07 while
+the season results hold, a spurious second wave changes nothing. One small bias: Croatia's S0 comes
+back 0.044 logit low, the seed prior pulling on its very small seeds.
+
+**The documentation.** MODEL.md is rebuilt for reading: sections 1-7 are the current model and what
+it learned, each number from the R0 = 2.0 fit, section 8 a guide to the figures, and the
+investigations that shaped the design follow as dated appendices A-K.
+
+## 2026-09-27 -- children start each season more susceptible: a global S0 modifier anchored on cohort evidence; the elderly factor re-read as exposure
+
+**The owner's questions, discussed first.** Would expert knowledge say that children and the elderly
+both start a season more susceptible than adults? And does PHIRST or other work show that an older
+immune system raises the risk of infection, or only of severe outcomes?
+
+**Answer, from the literature (MODEL.md, appendix L).** Children: yes. Cohorts that test everyone find
+them infected most (PHIRST about 1.7 times adults; Tecumseh), household studies find them more
+susceptible, and the mechanism is prior immunity accumulating with age. The elderly: severity, not
+infection. About 90% of influenza deaths are in the 65+ and their vaccine response is weaker, but the
+same cohorts find them infected no more often than adults (PHIRST 0.80; Tecumseh least of all ages),
+and they carry cross-reactive immunity (in 2009, a third of the over-60s had antibodies to the new
+pandemic H1N1). The exception is subtype, through imprinting: people born before 1968 are at higher
+risk from H3N2 -- a candidate driver for the learning layer, not a constant.
+
+**Owner decision.** Implement a children's modifier to `S0`: global, because it is biology; able only to
+raise children's susceptibility; informed by the model, the data and real-world evidence.
+
+**What changed in the code.** `logit S0_young = logit S0_{c,s} + kappa`, `kappa = exp(log kappa)`, one
+shared slot at position 2S (182 parameters, 16 shared). It is in the C++, the base-R reference, the
+recovery study's prior draw, the design and mechanism figures, and the summaries (`S0_young`,
+`S0_typical_young`). The tests cover the layout, the prior's sum and curvature and the read-back, and
+a new test checks that the modifier only raises children's `S0` and vanishes as `kappa` goes to zero.
+The test cache guard refuses a fit from before the modifier.
+
+`kappa` -> 0 reproduces the engine of `da3a80e`: the log-likelihood to 6.5e-9 nats and the fitted means
+to 7e-13; the C++ agrees with R to 1e-10. The new `run_kappa_profile.R` holds the profile and the
+calibration. It and `run_pin_sweep.R` now reuse a cached fit only if it was fitted to the same data and
+settings. The sweep's cached fits predate the modifier and would otherwise have been read with the
+wrong layout.
+
+**What the data say.** The profile peaks at `kappa` = 0. As `kappa` rises, the children's reporting
+offset falls in step: the level of children's counts is held and only its attribution moves. The
+shape signal that could separate the two, children's waves leading and steepening, is weak. This is
+the verdict the per-contact test gave on 2026-09-11, now for initial immunity, the candidate that entry
+left open.
+
+At `kappa` = 1 the cost is 13.0 raw nats, but it is not evidence with the wave as the unit: 37 of 85
+waves favour the modifier, sign test p 0.28, and every bootstrap interval spans zero. The cost falls on
+two countries: Ireland -11.5 and Croatia -4.6; the other ten together gain +2.9. Only `kappa` = 3, a
+ratio of 2.2, is rejected, and only marginally (Wilcoxon p 0.04).
+
+**Decision on the prior: the cohort evidence decides, since the data cannot.** The prior is
+`log kappa ~ N(log 1.6, 0.2)`. Its centre is where the refitted model reproduces PHIRST's ratio of 1.7
+(1.59 by interpolation), and it is calibrated at R0 = 2.0. `kappa` acts on the logit scale, so another
+pin needs another centre.
+
+The fit gives `kappa` = 1.02 (0.76-1.37), with contraction 0.25, by design. Children are infected 1.44
+times as often as adults (PHIRST 1.7) and the elderly 0.69 times (PHIRST 0.80).
+
+**What moved.**
+- Children's attack rate rose from 25% to 35% and adults' fell from 26% to 23%.
+- The children's reporting offset fell from 1.95 to 1.25.
+- The country `S0` ranking correlates 0.90 with the previous one; Ireland moves to last.
+- The correlation of `S0` with data quality fell from 0.75 to 0.52.
+
+**What did not move.**
+- The reproduction number at season start stays at 1.29: the data fix how fast the epidemic grows, and
+  the modifier only moves who carries it.
+- The season effects and visibility correlate 0.999 with the previous fit.
+
+**The elderly factor, re-read.** `sigma_eld` (2.2 per contact) is kept, because it brings the
+elderly-to-adult infection ratio near PHIRST's. It is read as exposure the contact matrices miss, not
+as susceptibility to infection.
+
+**The check.** The refit converged with no flat country and a positive-definite penalised Hessian. The
+full suite gives 1038 passed and 0 failed (1 skipped, as before). Three figure captions (07, 13 and 14)
+had called the elderly factor susceptibility and left out the children's modifier; they are corrected.
+
+**Open for the owner.**
+- A European anchor in place of PHIRST, such as Flu Watch in England, if its age-specific infection
+  rates can be extracted.
+- If PHIRST should be matched exactly: fixing `kappa` at 1.6 costs about 7 more raw nats than the fit
+  (about 20 against none), which is not significant with the wave as the unit.
+- Imprinting by subtype as a driver.
+
+## 2026-09-27 (later) -- the elderly susceptibility factor removed; the children's prior recalibrated
+
+**Owner decision.** Keep the children's modifier, and remove `sigma_eld`, the elderly's extra infection
+per contact. The literature finds the elderly no more infected than adults -- ageing raises severity,
+not infection -- and parsimony argues for one parameter fewer.
+
+**What changed in the code.** The slot, its prior, and the per-evaluation re-weighting and
+renormalisation of the contact matrix are gone: 181 parameters, 15 shared. The C++ now uses each
+matrix as built, `jm_build_data` checks that its spectral radius is 1, and the power iteration went
+with the re-weighting. A data object from before the removal is refused. The recovery study, the
+report and the tests follow. The design figure lost a row, captions 07, 13 and 14 were rewritten, and
+figure 16 now shows the children's modifier in the elderly factor's place.
+
+Checked:
+- With the factor at 1, the new engine reproduces the old one to 1.2e-8 nats and the fitted means to
+  1e-13. The posteriors differ by exactly the removed prior term.
+- C++ agrees with R to 1e-10 relative.
+- The refit reaches the same optimum from a cold start and from the old fit (0.000 nats).
+
+**What the removal cost, measured.** The fit is 10.9 raw nats worse. That is small, but with the wave
+as the unit it is evidence:
+- 58 of 85 waves fit better with the factor (sign test p 0.001, Wilcoxon p 0.0001).
+- Every bootstrap interval excludes zero: waves -17 to -5, countries -16 to -6, seasons -19 to -3.
+- 11 of 12 countries lean the same way.
+- Half the cost is in the elderly's counts and half in the children's.
+
+**What moved.**
+- The elderly's attack rate fell from 16% to 6.5%: 0.69 to 0.29 times adults, against 0.80 in PHIRST.
+- Their counts are now matched by visibility. The elderly reporting offset rose from 0.78 to 1.83 times
+  adults (median; the Netherlands 8.6).
+- Nothing the learning layer uses moved: the season effects, visibility and the country `S0` ranking
+  correlate 1.000 with the fit that had the factor.
+
+**Reading.** The factor could never be susceptibility; at most it was exposure the contact matrices
+miss, such as care homes and grandparenting. It moved the elderly's excess of cases between infection
+and visibility:
+- With it, the elderly were infected 0.69 times as often as adults and seen 0.78 times as readily.
+  This matches the cohort's infection ratio.
+- Without it, 0.29 and 1.8 times. This matches the severity literature, since a sicker patient is
+  likelier to see a doctor.
+
+PHIRST's elderly live in multigenerational households, so the European ratio is not known well enough
+to fix a correction. The removal trades a small, consistent loss of fit for one parameter fewer and
+nothing to reinterpret. If the elderly's attack rate ever becomes a target, the correction belongs on
+contacts, not susceptibility.
+
+**The children's prior, recalibrated.** Without the elderly factor, the refitted model reproduces
+PHIRST's children-to-adult ratio of 1.7 at `kappa` = 1.49, against 1.59 before, so the prior centre
+moves from 1.6 to 1.5. The fit gives `kappa` = 0.94 (0.70-1.28), children infected 1.42 times adults,
+and contraction 0.23.
+
+The profile is otherwise as before: its maximum is at none, and at `kappa` = 1 the cost is 15.4 raw
+nats but not evidence wave by wave (36 of 85 waves favour it, p 0.19). The cost falls on Ireland and
+Croatia.
+
+**A defect found in the profile runner.** Started from the working fit alone, the fit at `kappa` = 0
+stuck 45 nats worse: Italy 2024/2025, its only ERVISS season, moved its wave early and let that source's
+baseline absorb the counts. The flat-line protector does not look for this mode, and every
+"against none" comparison inherited it. `run_kappa_profile.R` now fits each value from two starts (the
+working fit and the nearest value already profiled), keeps the better, and prints any disagreement.
+
+**The recovery study, re-run on this model (the first since both age changes).**
+- Recovered: the country `S0` ranking 0.97, the season effects 0.97, visibility 0.99. Median interval
+  coverage is 93%. A driver effect comes back unbiased: 0.245 for 0.25, and 0.359 for 0.35.
+- Not recovered, as designed: the children's modifier. Simulated at 0.94, it comes back at 1.22,
+  pulled towards its prior centre, and its intervals cover 4 of 8.
+- Every country's adult `S0` shifts about 0.06 logit down with it, to keep the growth rates (the
+  correlation of the two errors across replicates is -0.97). That drops `S0_c` coverage to 77%.
+  Relative to that common shift the country errors are 0.03 logit and the ranking holds.
+- Misspecification: the country ranking falls to 0.27 when true R0 differs between countries (0.07 in
+  the previous single replicate).
+- Figure 16 no longer caps a single-truth panel at the edge. The modifier's offset from its truth is
+  the finding, not a failure, and every panel now keeps its diagonal in view.
+
+## 2026-09-27 (close) -- the project parked; a printable report
+
+**Owner decision.** The project is parked here. Its state is summarised in one printable A4 report,
+`documentation/joint_model_report.pdf` (16 pages). The report covers the data, the evidence from
+studies, the model and how to read its parameters, what informs each parameter, what the model learned,
+how well it fits and where it does not, and how far to trust it.
+
+The source lives in `code/07_joint_model/report/`:
+- `report_figures.R` redraws the figures for print from the saved fit.
+- `REPORT.md` is the text.
+- `build_report.sh` runs pandoc, then headless Chromium, to produce the PDF.
+
+The numbers are those of the working fit of 2026-09-27: 181 parameters, no elderly factor, and a
+children's prior centred on 1.5.
+
+**One figure is new:** what informs the children's modifier. It sets the surveillance data's profile
+against the cohort's infection ratio.
+
+**The figure palette changed.** The age-group colours failed a colour-vision check: blue and green sat
+only Delta E 14.7 apart, below the floor of 15, and the blue read as grey. They are now a checked
+palette (aqua, blue, orange: all pairs Delta E >= 9 under colour-vision deficiency, and >= 24 in normal
+vision). The aqua is light on white, so every figure that uses it also carries a legend.

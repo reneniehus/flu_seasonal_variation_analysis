@@ -116,6 +116,35 @@ code/03_report/                eyeballing_report.Rmd (data-quality / dynamics re
 code/04_modelling/             build_slim_panel.R (write the committed panel via the shared stitch),
                                fit_methods_demo.R (every method, all seasons), descriptive_overview.R,
                                ekf_overview.R
+code/07_joint_model/           THE WORKING MODEL (branch flu_comp_model): all countries and seasons
+                               fitted jointly. MODEL.md (START HERE: sections 1-7 the model as it
+                               stands and what it learned, section 8 a guide to the figures,
+                               appendices A-L the dated investigations), joint_model.cpp (the entire
+                               log-posterior in C++), joint_model.R (data, packing, block-coordinate
+                               fitting, the flat-line protector, identifiability and adequacy
+                               diagnostics), joint_recovery.R (intervals; simulate-and-recover, the
+                               misspecification arms that make the test able to FAIL, and the driver
+                               hook for the learning layer), joint_report.R (the default numbered
+                               figure set), run_joint_model.R, run_joint_recovery.R;
+                               joint_compare.R (model comparison with the wave as the unit),
+                               run_pin_sweep.R (what the R0 pin's value does), run_prior_stress.R
+                               (are the season results the data's or the priors'?),
+                               run_kappa_profile.R (the children's S0 modifier: what the data say,
+                               and the calibration of its prior against PHIRST); report/ (the
+                               printable report: report_figures.R, REPORT.md, build_report.sh ->
+                               documentation/joint_model_report.pdf). (The S0-vs-R0
+                               sensing comparison, figure 17, lives at commit 7b04681; the fitted
+                               spatial-spread analysis, figure 18, at commit c9286b7.)
+code/06_comp_model/            the compartmental PILOT that preceded it, kept for its assumption
+                               record and its data layer (build_comp_data is still used):
+                               ASSUMPTIONS.md (every assumption, with provenance and evidence),
+                               comp_model_settings.R, contact_matrix.R (exact-R0 scaling),
+                               comp_model_core.R (R reference) + comp_model_core.cpp (identical
+                               C++ engine), comp_model_data.R, comp_model_fit.R (two-stage EKF),
+                               comp_model_report.R (eyeballing figures), run_comp_model.R,
+                               run_age_experiment.R (age-specific reporting vs susceptibility,
+                               12 countries, against the PHIRST attack-rate profile),
+                               comp_model_joint.R + run_comp_model_joint.R (shared season R0)
 code/05_analysis/              the driver analysis: analysis_helpers.R (shared Gibbs samplers, rhat,
                                VE-vs-dominant rule), prepare_descriptors.R, dominant_subtype.R,
                                analyse_patterns.R, plot_patterns.R, plot_vax_scatter.R,
@@ -141,7 +170,10 @@ Where each kind of information lives:
 | `documentation/quickstart.md` | how to set up and run |
 | `documentation/data_overview.md` | what data is present (`data`, `models_in`, indicators) |
 | `documentation/documentation.Rmd` | the model maths / science (SIR, inference, contact matrix) |
+| `documentation/joint_model_report.pdf` | **the printable status report** of the joint model (A4, 16 pages): data, evidence, model, behaviour and fit, with every figure; built by `code/07_joint_model/report/` |
+| `code/07_joint_model/MODEL.md` | the WORKING model: its abstract, what varies where, what was cut and why, and whether it recovers a known truth |
 | `documentation/decisions.md` | **why** — rationale for key modelling / method / data decisions |
+| `documentation/to_confirm_with_surveillance.md` | **what we inferred rather than know** — open questions about what the source data MEAN, for surveillance colleagues, with what changes under each answer |
 | `documentation/analysis_strategy.md` | the driver analysis — strategy, principles, what we've learned, ranked next steps |
 | `documentation/findings_descriptors.md` | results of the descriptor / driver analyses |
 | `documentation/external_drivers.md` | externally-sourced drivers (subtype, vaccination, climate, VE) — provenance, values, caveats |
