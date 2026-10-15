@@ -6,10 +6,10 @@ they cover and how far to trust them.
 
 | Data need (one-pager) | Folder | Sources so far |
 |---|---|---|
-| Primary care ILI rates | [`primary_care_ili_rates/`](primary_care_ili_rates/README.md) | ERVISS only |
-| Primary care test positivity for flu | [`primary_care_flu_positivity/`](primary_care_flu_positivity/README.md) | ERVISS only |
-| SARI rates | [`sari_rates/`](sari_rates/README.md) | ERVISS only |
-| SARI test positivity for flu | [`sari_flu_positivity/`](sari_flu_positivity/README.md) | ERVISS only |
+| Primary care ILI rates | [`primary_care_ili_rates/`](primary_care_ili_rates/README.md) | ERVISS only, merged across its releases from 2014/15 |
+| Primary care test positivity for flu | [`primary_care_flu_positivity/`](primary_care_flu_positivity/README.md) | ERVISS only, merged across its releases from 2014/15 |
+| SARI rates | [`sari_rates/`](sari_rates/README.md) | ERVISS only (merged from 2020-W40, its first SARI week, in the hospitalisation folder) |
+| SARI test positivity for flu | [`sari_flu_positivity/`](sari_flu_positivity/README.md) | ERVISS only (merged from 2020-W40, its first SARI week, in the hospitalisation folder) |
 | Diverse influenza hospitalisation indicators | [`flu_hospitalisation_indicators/`](flu_hospitalisation_indicators/README.md) | ERVISS, merged across releases, plus seven national sources from a wider search |
 | Dominant influenza subtype | not yet | an earlier analysis's table is in `external/` (below) |
 | Influenza vaccination coverage | not yet | RespiCompass and an external 65+ table (below) |

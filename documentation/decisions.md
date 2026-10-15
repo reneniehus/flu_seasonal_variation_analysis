@@ -1331,3 +1331,30 @@ classified by what it is:
 - **A lead not yet used:** ERVISS snapshots from 2024-01-26 to 2024-10-18 carry ILI rates and
   sentinel positivity back to 2014-W40. Merging them would give ERVISS's own pre-COVID-19 seasons,
   next to RespiCompass's ILI+.
+
+## 2026-10-15 -- ILI rates and primary-care positivity extended back to 2014/15 from ERVISS's own releases
+
+**Owner decision.** Extend the ERVISS primary-care files with ECDC's dated releases.
+
+**What was built.** `code/09_erviss_history/` merges ERVISS's ILI and ARI rates and its sentinel and
+non-sentinel influenza tests across its releases. The results live in `data/primary_care_ili_rates/`
+and `data/primary_care_flu_positivity/`, as `*_merged.csv`.
+
+**The merge rule.** ERVISS's window changed three times: it started at 2014-W40 up to the 2024-10-18
+release, then at 2020-W25, then 2021-W25, and since August 2026 at 2022-W25. The merge therefore takes
+the last release of each window plus the current file, and keeps each value's newest publication. This
+is the same rule as for the hospital indicators.
+
+**Choices, with the main alternative**
+- **Merged files sit beside the pipeline's snapshots and do not replace them.** The pipeline's
+  snapshots are the 2026-05-22 release, byte for byte. Wiring the merged files into the ILI+ panel
+  would change the panel and every result downstream, so that is left to the owner.
+- **Values that only older releases carry are kept and flagged** with `dropped_later`, 307 of them for
+  ILI, most of them Norway's 2023/24. The alternative, dropping them as withdrawn, was rejected because
+  ECDC's intent is unknown; the flag lets either reading be applied.
+
+**What the extension showed**
+- **RespiCompass's ILI+ is ERVISS's ILI rate × positivity** for 18 of 26 countries (ratio 1.000), and
+  ×1000 for Cyprus and Luxembourg. It differs for Malta, Finland and Latvia.
+- **The pre-COVID-19 series end where sentinel testing ended**, about season week 41–42. This is
+  evidence on open questions 3, 4 and 6 in `to_confirm_with_surveillance.md`.

@@ -100,6 +100,7 @@ code/04_modelling/             build_slim_panel.R, fit_methods_demo.R, descripti
 code/05_analysis/              driver analysis (prepare_descriptors, analyse_patterns,
                                hierarchical_models, dominant_subtype, bayes_*, plot_*)
 code/08_flu_hospitalisation/   influenza-hospitalisation indicators (build_all.sh -> data/flu_hospitalisation_indicators/)
+code/09_erviss_history/        ERVISS ILI rates and positivity merged across releases, from 2014/15 (build_all.sh)
 stan/                          SIR_multiseason_age_vax_2.stan (Bayesian SIR)
 data/                          committed raw snapshots (offline bootstrap); one folder per data need,
                                each with a README (index: data/README.md)

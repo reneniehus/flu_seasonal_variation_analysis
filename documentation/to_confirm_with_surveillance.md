@@ -108,6 +108,17 @@ seasons run to 52–53. Is that the real extent of reporting, or is our copy of 
 baselines are estimated from almost no off-season. It also drives the uneven season support the model
 now reports (`jm_summary_season`).
 
+**Evidence from ERVISS's own releases (2026-10-15).** ERVISS's releases of 2024 still carried
+2014/15–2019/20, merged in `data/primary_care_ili_rates/`. Over the 126 pre-COVID country-seasons:
+- ERVISS's own ILI+ (ILI rate × positivity) ends at a median season week of 41, exactly where
+  RespiCompass's does, with the same median of 27 weeks a season.
+- Sentinel testing then ran in winter only: a median of 30 tested weeks, the last around season week
+  42.
+- ILI rates were reported almost all year, at a median of 43 weeks.
+
+So our copy is not truncated: the series end where testing ended. Unless colleagues know otherwise,
+the answer is "the real extent of reporting".
+
 ---
 
 ## 4. Is non-sentinel positivity the right choice for HR, IS, MT, RO, LV and FI? — **OPEN**
@@ -119,6 +130,17 @@ and does it make their ILI+ comparable with the sentinel-based countries?
 **Why it matters.** Croatia is in the fitted design. The non-sentinel stream is also the one with the
 *more* ambiguous detections rows (438 against 271), so question 1 bites harder there — and Iceland and
 Malta, both non-sentinel, are the countries that would otherwise qualify for inclusion.
+
+**Evidence (2026-10-15).** RespiCompass made the same choice: its ILI+ uses non-sentinel tests for
+exactly these six countries (`data/data_respicompass_iliplus.csv`, column `source`).
+
+Rebuilt from ERVISS, their ILI+ still differs from RespiCompass's more than other countries' does
+(`data/primary_care_ili_rates/iliplus_erviss_vs_respicompass.csv`):
+- Croatia, Iceland and Romania: ratios of 0.94–0.98.
+- Finland: a ratio of 0.43.
+- Latvia: r = 0.21.
+
+The choice is shared, then, but the numbers for Finland and Latvia are not settled.
 
 ---
 
@@ -144,3 +166,9 @@ series comparable with a population-denominator rate?
 **Why it matters.** None of the three is in the current design, but Malta is an expansion candidate,
 and a wrong basis would put its reporting level and age offsets on a different scale from everyone
 else's without anything flagging it.
+
+**Evidence (2026-10-15).** RespiCompass rescales the same way, at least for Cyprus and Luxembourg:
+their RespiCompass ILI+ is exactly 1000 × ERVISS's ILI rate × positivity. Malta's is 942 times
+ERVISS's, with r = 0.92, so for Malta RespiCompass's values are not a plain rescaling of ERVISS. See
+`data/primary_care_ili_rates/iliplus_erviss_vs_respicompass.csv`. Whether ×1000 makes a
+per-100-consultations rate comparable with a population rate remains the open part.

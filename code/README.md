@@ -161,6 +161,11 @@ code/08_flu_hospitalisation/  the influenza-hospitalisation indicators: fetch_so
                                build_coverage.py (indicator classes, best per country-season),
                                reconcile.py (national against ERVISS), plot_coverage.R, plot_series.R;
                                build_all.sh runs them all -> data/flu_hospitalisation_indicators/
+code/09_erviss_history/        ERVISS primary-care files merged across its releases, from 2014/15:
+                               fetch_releases.sh (the last release of each ERVISS window, pinned),
+                               merge_releases.py (ILI and ARI rates; influenza tests and detections),
+                               compare_iliplus.py (ERVISS ILI+ against RespiCompass's), plot_history.R;
+                               build_all.sh -> data/primary_care_ili_rates/, data/primary_care_flu_positivity/
 stan/                          SIR_multiseason_age_vax_2.stan (Bayesian SIR)
 data/                          one folder per data need of the one-pager, each with a README (index:
                                data/README.md), holding the committed ERVISS snapshots and the
