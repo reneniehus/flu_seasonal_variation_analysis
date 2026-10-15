@@ -86,21 +86,22 @@ load_data_epi = function(data=list(), params=NULL, regenerate=FALSE, new_from_on
     # to add a new ERVISS stream, simply add a row here -- the loop below does the rest.
     #   name     : key under data$epi$<name> (used by the downstream code)
     #   file     : exact CSV file name in the ERVISS /data folder
-    #   snapshot : local snapshot file kept in data/ (used when new_from_online==F)
+    #   snapshot : local snapshot file under data/ (used when new_from_online==F); streams that serve a
+    #              data need of the project one-pager sit in that need's folder, next to its README
     #   schema   : "rates"    -> slim consultation/hospitalisation-rate table
     #              "detailed" -> keep all columns (pathogen / variant / datasource kept)
     erviss_url = "https://raw.githubusercontent.com/EU-ECDC/Respiratory_viruses_weekly_data/main/data/"
     erviss_registry = tribble(
-      ~name,                         ~file,                                       ~snapshot,                           ~schema,
-      "erviss_ili_ari",              "ILIARIRates.csv",                           "erviss_iliari.csv",                 "rates",
-      "erviss_sari_rates",           "SARIRates.csv",                             "erviss_sari_rates.csv",             "rates",
-      "erviss_typing_sentinel",      "sentinelTestsDetectionsPositivity.csv",     "erviss_detections_sentinel.csv",    "detailed",
-      "erviss_typing_nonsentinel",   "nonSentinelTestsDetections.csv",            "erviss_detections_nonsentinel.csv", "detailed",
-      "erviss_typing_sari",          "SARITestsDetectionsPositivity.csv",         "erviss_detections_sari.csv",        "detailed",
-      "erviss_flu_type_subtype",     "activityFluTypeSubtype.csv",                "erviss_flu_type_subtype.csv",       "detailed",
-      "erviss_severity_nonsentinel", "nonSentinelSeverity.csv",                   "erviss_severity_nonsentinel.csv",   "detailed",
-      "erviss_sequencing",           "sequencingVolumeDetectablePrevalence.csv",  "erviss_sequencing.csv",             "detailed",
-      "erviss_variants",             "variants.csv",                              "erviss_variants.csv",               "detailed"
+      ~name,                         ~file,                                       ~snapshot,                                                   ~schema,
+      "erviss_ili_ari",              "ILIARIRates.csv",                           "primary_care_ili_rates/erviss_iliari.csv",                  "rates",
+      "erviss_sari_rates",           "SARIRates.csv",                             "sari_rates/erviss_sari_rates.csv",                          "rates",
+      "erviss_typing_sentinel",      "sentinelTestsDetectionsPositivity.csv",     "primary_care_flu_positivity/erviss_detections_sentinel.csv",    "detailed",
+      "erviss_typing_nonsentinel",   "nonSentinelTestsDetections.csv",            "primary_care_flu_positivity/erviss_detections_nonsentinel.csv", "detailed",
+      "erviss_typing_sari",          "SARITestsDetectionsPositivity.csv",         "sari_flu_positivity/erviss_detections_sari.csv",            "detailed",
+      "erviss_flu_type_subtype",     "activityFluTypeSubtype.csv",                "erviss_flu_type_subtype.csv",                               "detailed",
+      "erviss_severity_nonsentinel", "nonSentinelSeverity.csv",                   "flu_hospitalisation_indicators/erviss_severity_nonsentinel.csv", "detailed",
+      "erviss_sequencing",           "sequencingVolumeDetectablePrevalence.csv",  "erviss_sequencing.csv",                                     "detailed",
+      "erviss_variants",             "variants.csv",                              "erviss_variants.csv",                                       "detailed"
     )
 
     # ---- |-load + standardise every ERVISS stream ----

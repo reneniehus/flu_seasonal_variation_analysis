@@ -99,8 +99,10 @@ code/03_report/                eyeballing_report.Rmd, data_availability.R
 code/04_modelling/             build_slim_panel.R, fit_methods_demo.R, descriptive_overview.R, ekf_overview.R
 code/05_analysis/              driver analysis (prepare_descriptors, analyse_patterns,
                                hierarchical_models, dominant_subtype, bayes_*, plot_*)
+code/08_flu_hospitalisation/   influenza-hospitalisation indicators (build_all.sh -> data/flu_hospitalisation_indicators/)
 stan/                          SIR_multiseason_age_vax_2.stan (Bayesian SIR)
-data/                          committed raw snapshots (offline bootstrap)
+data/                          committed raw snapshots (offline bootstrap); one folder per data need,
+                               each with a README (index: data/README.md)
 output/                        cached data lists (gitignored, regenerated)
 tests/testthat/                contract + invariant tests
 documentation/                 quickstart, data_overview, decisions, analysis_strategy,

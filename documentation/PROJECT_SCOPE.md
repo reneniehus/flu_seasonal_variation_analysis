@@ -1,5 +1,8 @@
 # Drivers of inter-seasonal variability in seasonal influenza across the EU/EEA: a retrospective analysis
 
+> The project is summarised on one page in the [repository README](../README.md). This document
+> gives the longer background, the research questions and the references.
+
 ## Background and rationale
 
 Seasonal influenza recurs every winter across the EU/EEA, yet the shape of each epidemic varies markedly — both between countries and from one year to the next — in the timing of onset and peak, peak intensity, duration, and cumulative burden. Each year, well before a season begins, public health authorities across the EU/EEA must commit to preparations: communicating the importance of vaccination, procuring and allocating vaccines, and planning hospital and ICU capacity. These commitments are made while the course of the coming season is still largely unknown. Preparing under this uncertainty is costly: it risks misallocating scarce healthcare resources, or leaving communities across the EU/EEA under-protected when a severe season arrives — the citizens whose health ECDC is mandated to protect.
@@ -76,9 +79,10 @@ drivers (climate, subtype novelty, vaccine effectiveness) are the next stage.
 
 ## Repository
 
-How to run, the data layer and the method framework are documented in `README.md` and
-`documentation/` (quickstart, data overview, the model maths). Key design choices and their
-rationale are recorded in `documentation/decisions.md`.
+How to run, the data layer and the method framework are documented in `code/README.md` and
+`documentation/` (quickstart, data overview, the model maths). The data needs, each with its sources
+and coverage, are under `data/` (index: `data/README.md`). Key design choices and their rationale are
+recorded in `documentation/decisions.md`.
 
 ## Key references and related work
 

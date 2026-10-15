@@ -33,3 +33,6 @@ packrat/lib*/
 output/comp_model/
 output/joint_model/
 Rplots.pdf
+
+# ---- Python bytecode (code/08_flu_hospitalisation) ----
+__pycache__/

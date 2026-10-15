@@ -1,204 +1,86 @@
-# flu_seasonal_variation_analysis
+*Project on a page*
 
-Characterising the **drivers of inter-seasonal variability** of seasonal influenza across the
-EU/EEA — 166 country-seasons of real surveillance data turned into per-season wave features, then
-related to candidate drivers (dominant subtype, vaccine effectiveness, 65+ coverage, prior-season
-burden). Research aim and scope: `PROJECT_SCOPE.md`.
+# Analysing seasonal variation in influenza burden across the EU/EEA
 
-> Renamed from `flu-susceptible-fit` (2026-08) to match the project purpose. Two related
-> repositories share history with this one:
->
-> - **[respi_starter](https://github.com/reneniehus/respi_starter)** — the reusable ECDC
->   surveillance ingest template this project grew out of: real ERVISS / RespiCompass data in,
->   canonical model-ready tables plus a data-quality report out, with modelling deliberately
->   left as a scaffold.
-> - **[pandemic_toolbook](https://github.com/reneniehus/pandemic_toolbook)** — a pandemic
->   simulation playground with known ground truth, paired with an outbreak-analysis toolbox.
->   It began on the `claude/pandemic-simulation-playground-jlg1rs` branch here before moving to
->   its own repo.
+**Date:** October 2026
 
-The season-summarising engine reads a per-season sense of population **susceptibility** off **flu ILI+** waves with a
-susceptible-reconstruction **SIR model**, through a small **swappable-method framework** plus a
-reference Bayesian model:
+## Project team
 
-- **Method framework (R)** — `code/01_main_supporting/sir_core.R` (shared SIR engine) +
-  `code/01_main_supporting/methods/` (one file per method) + `methods_registry.R` (registry +
-  common per-season summary schema). Every method fixes R0, the infectious period and the seed
-  `I0` (from settings) and fits, per season, the **susceptibility** `S0` and a **reporting
-  fraction** `c`, with a shared baseline `b` and overdispersion `phi`. Methods so far:
-  - `deterministic` — the season's wave *is* a single deterministic SIR; observations are
-    overdispersed noise around it. `S0` is identified by the wave's rise rate. Transparent; misfit
-    shows up as honest residuals.
-  - `ekf` — the same model with an Extended Kalman Filter, admitting **process noise** so the
-    epidemic can wander off the deterministic SIR (one shared `q_I` per country, fitted but
-    regularised small). The two methods agree on wave shape but the EKF draws more contrast between
-    seasons' `S0` — comparing them is exactly what the framework is for.
-  - `descriptive` — non-mechanistic: **smooths** each curve (centered moving average) and reads off
-    features (AUC, peak height, onset week, steepness) directly. It fits no SIR and reports no `S0` —
-    the observed-shape features are compared *within* a country, not mapped onto the SIR
-    susceptibility axis (that mechanistic-vs-phenomenological mapping is deliberately out of scope).
-- **Bayesian SIR (Stan)** — `stan/SIR_multiseason_age_vax_2.stan`: an age- and vaccination-
-  structured, multi-season SIR fit by HMC, with scenario projections (reference model).
+- **Rene** — Project lead; runs the analysis, writes outputs
+- **Edoardo** — Line manager, supervisor and internal end-user
+- **Nick, Luisa, Leah** — Surveillance data interpretation and context. **Input needed**
+- **VPI team** — VE estimates (VPI team)
 
-The repo also carries the full data layer: ECDC **ERVISS** + **RespiCompass** surveillance
-(ILI/ARI, typing/positivity), contact matrices, vaccination and demography, turned into tidy
-model-ready tables, with a data-quality / dynamics report.
+## Justification (problem/opportunity, alignment with team and organisation goals)
 
-## Quick start
+- Before each winter, EU/EEA authorities plan vaccination and healthcare capacities in response to
+  seasonal virus burden in the absence of reliable predictions.
+- Forecasts provided by ECDC's RespiCast are only short term, and long-term prediction of viral burden
+  has proved highly challenging
+- As a step towards understanding viral circulation and burden patterns, we focus here on influenza
+  and carefully analyse historical variation of relevant indicators across seasons and across the
+  EU/EEA
+- By examining the association between such variation and plausible drivers of viral burden, we
+  generate hypothesis about the predictable nature of seasonal influenza burden.
 
-```r
-renv::restore()                       # install pinned dependencies (renv.lock)
-source("code/00_main.R")              # build the data and model inputs
-```
+## Data needs
 
-Fit per-season **susceptibility** across a country's seasons (base R; no pipeline needed — uses the
-committed slim panel `data/slim_flu_iliplus.csv`):
+- [Primary care ILI rates](data/primary_care_ili_rates/README.md) \[season,country,week,age\]
+- [Primary care test positivity for flu](data/primary_care_flu_positivity/README.md) \[season,country,week\]
+- [SARI rates](data/sari_rates/README.md) \[season,country,week,age\]
+- [SARI test positivity for flu](data/sari_flu_positivity/README.md) \[season,country,week\]
+- [Diverse influenza hospitalisation indicators](data/flu_hospitalisation_indicators/README.md) \[season,country\]
+- Dominant influenza subtype \[season,country\]
+- Influenza vaccination coverage \[season,country\]
 
-```r
-source("code/02_settings/settings_version0.R"); params <- settings()
-source("code/01_main_supporting/sir_core.R")
-source("code/01_main_supporting/methods/method_sir_deterministic.R")
-source("code/01_main_supporting/methods_registry.R")
+## Objectives (SMART: specific, measurable, achievable, relevant, time-bound) and Deliverables
 
-sl  <- load_flu_iliplus_slim("DK")                  # one country's per-season weekly ILI+
-fit <- run_method("deterministic", sl, params)      # any registered method, same call
-summarise_method_fit(fit)                           # tidy: S0, R_eff, c, peak/onset week, cor, ...
-```
+1. Determine surveillance indicators that correlate with severe disease burden caused by influenza: by
+   mid-December 2026 produce a 1-page report that establishes a selection of influenza indicators
+   based on discussion with surveillance and disease experts and evidence on temporal correlation
+   between influenza-related indicators.
+2. By end of February 2027, produce a descriptive 2-page report of relevant influenza indicator(s)
+   dynamics for all country-seasons.
+3. By end of March 2027, examine whether plausible seasonal drivers of influenza burden relate to
+   between season variation. Through discussing these results with disease experts, this may generate
+   hypothesis about the predictability of future influenza season.
+4. The resulting hypotheses and supporting evidence are presented in a 2–4-page technical brief.
 
-`fit$params$S0` is the per-season susceptibility — **interpret the within-country RANKING across
-seasons**, not the absolute level (conditional on the fixed R0/seed) and not the fine spacing of the
-gaps (method-dependent, esp. for the EKF — see `documentation/decisions.md`).
+## Scope
 
-Run every registered method and save a figure per method:
+**In scope**
 
-```sh
-Rscript code/04_modelling/fit_methods_demo.R        # -> output/fit_<method>.png
-```
+- Influenza ILI+ (ILI rate × positivity), 2014/15–2018/19 and 2023/24–2025/26; panel refreshed to
+  complete 2025/26
+- Burden compared within country (reporting scales differ by orders of magnitude); timing and growth
+  also across countries
+- Biphasic-season flags; robustness to smoothing, onset threshold and RespiCompass-to-ERVISS source
+  change (2023/24 the only overlap season)
+- Indicator screen with existing within-country models
 
-## The model in one paragraph
+**Out of scope**
 
-A latent SIR in population proportions (`dS/dt = -beta S I`, `dI/dt = beta S I - gamma I`,
-`beta = R0·gamma`) drives weekly ILI+, taken proportional to weekly new infections
-(`E[y] = c · new infections + b`). Observation noise is neg-binomial-like (`Var = mu + mu²/phi`).
-With R0, the infectious period and the seed `I0` fixed, the wave's **rise rate**
-`r = gamma·(R0·S0 − 1)` identifies the per-season susceptibility `S0`; `c` carries the reporting
-scale and `b` the off-season baseline. The deterministic method trusts the SIR fully (residuals are
-noise); the EKF method adds process noise so the latent state can deviate from it. A single-season,
-single-strain SIR does not capture secondary-strain or strongly NPI-shaped seasons, by design.
+- Forecasts or scenario projections
+- Causal or mechanistic modelling
+- Analysis of COVID-19, RSV or other disease indicators
 
-## Tests
+## Dependencies / constraints
 
-```r
-Rscript run_tests.R                   # offline, from the committed data/ snapshots
-```
+- **Timely input from named colleagues**\
+  Responsible: Project lead; named colleagues
+- **Lack of influenza-confirmed hospitalisation data in the EU/EEA; cross-country surveillance
+  differences; confounds pre/post-COVID**\
+  Responsible: Project lead
+- **Limited capacity of the project lead (currently <0.5 FTE for modelling)**\
+  Responsible: Project lead; line manager
 
-Checks the data contracts and canonical tables; that each method converges with plausible
-parameters and reproduces the observed waves (`tests/testthat/test-sir-deterministic.R`); that
-every registered method honours the common summary schema (`tests/testthat/test-methods-registry.R`);
-that the committed slim panel obeys its construction rules and is reproduced exactly by the build
-(`tests/testthat/test-slim-panel.R`); and that both mechanistic methods RECOVER known S0 values (rank
-order + calibrated tolerance) from data simulated by the generative model itself
-(`tests/testthat/test-sir-recovery.R` — the S0-identifiability claim, exercised on known truth).
+*Classified as ECDC NORMAL*
 
-## Layout
+---
 
-```
-code/00_main.R                 build data + model inputs (run-order map for everything in its header)
-code/01_main_supporting/       setup, validate, load_data, gen_model_input, eyeballing,
-                               stitch_iliplus (THE panel-assembly rules, one implementation),
-                               sir_core (shared SIR engine + multi-start optimiser + loaders),
-                               methods/ (one file per fitting method),
-                               methods_registry (registry + per-season summary schema),
-                               send_report (manual email utility)
-code/02_settings/              settings_version0.R (live params only, incl. susc_* fixed values)
-code/03_report/                eyeballing_report.Rmd (data-quality / dynamics report),
-                               data_availability.R + driver_availability.R (coverage heatmaps)
-code/04_modelling/             build_slim_panel.R (write the committed panel via the shared stitch),
-                               fit_methods_demo.R (every method, all seasons), descriptive_overview.R,
-                               ekf_overview.R
-code/07_joint_model/           THE WORKING MODEL (branch flu_comp_model): all countries and seasons
-                               fitted jointly. MODEL.md (START HERE: sections 1-7 the model as it
-                               stands and what it learned, section 8 a guide to the figures,
-                               appendices A-L the dated investigations), joint_model.cpp (the entire
-                               log-posterior in C++), joint_model.R (data, packing, block-coordinate
-                               fitting, the flat-line protector, identifiability and adequacy
-                               diagnostics), joint_recovery.R (intervals; simulate-and-recover, the
-                               misspecification arms that make the test able to FAIL, and the driver
-                               hook for the learning layer), joint_report.R (the default numbered
-                               figure set), run_joint_model.R, run_joint_recovery.R;
-                               joint_compare.R (model comparison with the wave as the unit),
-                               run_pin_sweep.R (what the R0 pin's value does), run_prior_stress.R
-                               (are the season results the data's or the priors'?),
-                               run_kappa_profile.R (the children's S0 modifier: what the data say,
-                               and the calibration of its prior against PHIRST); report/ (the
-                               printable report: report_figures.R, REPORT.md, build_report.sh ->
-                               documentation/joint_model_report.pdf). (The S0-vs-R0
-                               sensing comparison, figure 17, lives at commit 7b04681; the fitted
-                               spatial-spread analysis, figure 18, at commit c9286b7.)
-code/06_comp_model/            the compartmental PILOT that preceded it, kept for its assumption
-                               record and its data layer (build_comp_data is still used):
-                               ASSUMPTIONS.md (every assumption, with provenance and evidence),
-                               comp_model_settings.R, contact_matrix.R (exact-R0 scaling),
-                               comp_model_core.R (R reference) + comp_model_core.cpp (identical
-                               C++ engine), comp_model_data.R, comp_model_fit.R (two-stage EKF),
-                               comp_model_report.R (eyeballing figures), run_comp_model.R,
-                               run_age_experiment.R (age-specific reporting vs susceptibility,
-                               12 countries, against the PHIRST attack-rate profile),
-                               comp_model_joint.R + run_comp_model_joint.R (shared season R0)
-code/05_analysis/              the driver analysis: analysis_helpers.R (shared Gibbs samplers, rhat,
-                               VE-vs-dominant rule), prepare_descriptors.R, dominant_subtype.R,
-                               analyse_patterns.R, plot_patterns.R, plot_vax_scatter.R,
-                               hierarchical_models.R, bayes_subtype.R, subtype_8season.R,
-                               bayes_prior_burden.R, bayes_precovid_ve_subtype.R,
-                               precovid_predict_postcovid.R
-stan/                          SIR_multiseason_age_vax_2.stan (Bayesian SIR)
-data/                          committed ERVISS / RespiCompass snapshots + slim_flu_iliplus.csv
-                               (+ data/external/ driver tables with provenance)
-output/                        cached data lists + figures (gitignored, regenerated)
-tests/testthat/                contract + method + panel + parameter-recovery tests
-documentation/                 quickstart, data_overview, decisions, analysis_strategy,
-                               findings_descriptors, documentation.Rmd (see table below)
-```
-
-## Documentation
-
-Where each kind of information lives:
-
-| File | Holds |
-|---|---|
-| `README.md` | what the repo does, quick start, the method framework, layout |
-| `documentation/quickstart.md` | how to set up and run |
-| `documentation/data_overview.md` | what data is present (`data`, `models_in`, indicators) |
-| `documentation/documentation.Rmd` | the model maths / science (SIR, inference, contact matrix) |
-| `documentation/joint_model_report.pdf` | **the printable status report** of the joint model (A4, 16 pages): data, evidence, model, behaviour and fit, with every figure; built by `code/07_joint_model/report/` |
-| `code/07_joint_model/MODEL.md` | the WORKING model: its abstract, what varies where, what was cut and why, and whether it recovers a known truth |
-| `documentation/decisions.md` | **why** — rationale for key modelling / method / data decisions |
-| `documentation/to_confirm_with_surveillance.md` | **what we inferred rather than know** — open questions about what the source data MEAN, for surveillance colleagues, with what changes under each answer |
-| `documentation/analysis_strategy.md` | the driver analysis — strategy, principles, what we've learned, ranked next steps |
-| `documentation/findings_descriptors.md` | results of the descriptor / driver analyses |
-| `documentation/external_drivers.md` | externally-sourced drivers (subtype, vaccination, climate, VE) — provenance, values, caveats |
-| `documentation/reflections.md` | project-relevance thoughts / interpretations / pondering (also inline `[REFLECTION]` tags) |
-| `PROJECT_SCOPE.md` | project scope (in / out of scope), research aim, references |
-| inline header comments | why each function / file works the way it does |
-
-New design decisions go in `documentation/decisions.md` (append-only), so the reasoning is kept
-with the code rather than only in commit messages.
-
-## Reproducibility
-
-`renv.lock` pins all dependencies (R 4.3.3); `renv::restore()` reproduces the environment.
-Data is public ECDC ERVISS / RespiCompass surveillance data. The build chain regenerates every
-analysis input from the committed snapshots: `code/00_main.R` writes the model-ready inputs to
-`output/models_in.rds` (a gitignored cache), from which `code/04_modelling/build_slim_panel.R`
-reproduces the committed panel `data/slim_flu_iliplus.csv` (verified byte-identical) and
-`code/05_analysis/prepare_descriptors.R` the descriptor tables the analyses consume. See
-`documentation/quickstart.md` and `documentation/data_overview.md` for more.
-
-## Note on the Stan model
-
-The model's verified indexing, accumulator and population-conservation bugs are now fixed, and a
-minimal proper prior set is re-enabled. Still pending before production HMC use: (a) the per-season
-effect parameters (`i_season`, `r_season`, `prop_ili_season`) remain disabled, so the model fits a
-season-invariant initial state and reporting ratio; (b) the remaining commented-out priors need
-Jacobian-aware re-derivation; (c) it is not compile-tested in this environment (no Stan toolchain).
-The R method framework remains the ready-to-run path.
+**In this repository.**
+- **Data:** each data need above links to its folder under [`data/`](data/README.md).
+- **Code and methods, and how to run them:** [`code/README.md`](code/README.md).
+- **Longer background and references:**
+  [`documentation/PROJECT_SCOPE.md`](documentation/PROJECT_SCOPE.md).
+- **Why things were done as they were:** [`documentation/decisions.md`](documentation/decisions.md).

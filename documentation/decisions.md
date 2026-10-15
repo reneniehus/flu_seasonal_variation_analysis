@@ -1,6 +1,6 @@
 # Design decisions & rationale
 
-The README records *what* the repo does and how to run it; this file records *why* the key
+`code/README.md` records *what* the repo does and how to run it; this file records *why* the key
 modelling, method and data choices were made, so the reasoning survives beyond commit messages and
 chat. Append new decisions as they are made. Keep each entry short: the **decision**, the reason,
 and the main alternative considered.
@@ -1284,3 +1284,50 @@ against the cohort's infection ratio.
 only Delta E 14.7 apart, below the floor of 15, and the blue read as grey. They are now a checked
 palette (aqua, blue, orange: all pairs Delta E >= 9 under colour-vision deficiency, and >= 24 in normal
 vision). The aqua is light on white, so every figure that uses it also carries a legend.
+
+## 2026-10-15 -- the repository opens on the project one-pager; influenza hospitalisation indicators added
+
+**Owner decision.** The repository is organised as a hierarchy that starts from the project
+one-pager, *Analysing seasonal variation in influenza burden across the EU/EEA*.
+- **The one-pager is `README.md`.** Each data need it lists links to a folder under `data/`. That
+  folder holds the data and a README covering the source, how the data were retrieved, coverage and
+  caveats.
+- **Displaced documents.** The previous technical README is now `code/README.md`, and
+  `PROJECT_SCOPE.md` moved to `documentation/`.
+- **The ERVISS snapshots moved into their data-need folders, unchanged:**
+  - ILI rates;
+  - primary-care positivity, sentinel and non-sentinel;
+  - SARI rates;
+  - SARI positivity;
+  - non-sentinel severity.
+
+  The registry in `load_data.R` points to the new paths.
+
+**Influenza hospitalisation indicators.** They live in `data/flu_hospitalisation_indicators/` and are
+built by `code/08_flu_hospitalisation/`.
+- **ERVISS:** the hospital, ICU and SARI series are merged across ERVISS's dated releases, so the
+  hospital and ICU counts reach back to 2014/15.
+- **SARI+:** positivity is assumed equal across ages, as the owner decided.
+- **National series:** seven, from a wider search.
+- **Reproducibility:** every input is pinned to a commit, and a rebuild from scratch reproduced the
+  tables exactly.
+
+**Classification choices.** ERVISS's indicator names hide different things, so each series is
+classified by what it is:
+- **ERVISS "hospital admissions" count as ICU** where they are the ICU series:
+  - Finland, the Netherlands, Portugal and Sweden, where the two are identical in 85–100% of weeks;
+  - France, where ICU is 1.00 of admissions;
+  - Italy, where it is 0.94.
+
+  The alternative, treating every ERVISS admissions series alike, was rejected because ICU-only
+  series would then pass as all admissions.
+- **Germany's SARI+ is class C, not B.** It is the J10-coded share of SARI cases (RKI ICOSARI), not a
+  laboratory positivity.
+
+**Corrections and open items.**
+- **France's unit, corrected from the earlier hand-over:** the OSCOUR series is per 100 000
+  hospitalisations after an emergency visit, not per 10 000.
+- **PDF-only national reports:** parked (owner, 2026-10-15).
+- **A lead not yet used:** ERVISS snapshots from 2024-01-26 to 2024-10-18 carry ILI rates and
+  sentinel positivity back to 2014-W40. Merging them would give ERVISS's own pre-COVID-19 seasons,
+  next to RespiCompass's ILI+.
