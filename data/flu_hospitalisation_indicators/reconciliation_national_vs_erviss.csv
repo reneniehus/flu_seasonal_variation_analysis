@@ -1,0 +1,6 @@
+country,national_indicator,erviss_indicator,period_type,periods_compared,first_period,last_period,pearson_r,ratio_national_to_erviss
+DK,lab_confirmed_admissions,hosp_admissions,week,158,2015-W41,2019-W05,0.985,0.856
+DE,SARI_influenza_coded_rate,sari_plus,week,209,2022-W40,2026-W40,1.0,0.994
+ES,SARI_influenza_rate,sari_plus,week,168,2022-W40,2025-W51,0.997,0.984
+FR,ED_to_hospital_influenza,icu_admissions,week,149,2020-W01,2026-W10,0.961,
+SE,inpatient_episodes_ICD_J09-J11,icu_admissions,month,81,2014-11,2024-08,0.894,16.416

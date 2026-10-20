@@ -22,40 +22,134 @@
 
 stitch_covid_seasons <- c("2019/2020", "2020/2021", "2021/2022", "2022/2023")
 
-stitch_iliplus_panel <- function(models_in, exclude_covid = TRUE, min_wk = 15,
-                                 overlap_season = "2023/2024"){
-  nonsentinel <- c("MT", "IS", "HR", "RO", "LV", "FI")  # ERVISS ILI+ uses NON-sentinel positivity
-  per_1000    <- c("CY", "LU", "MT")                    # per-100-consultations -> x1000 to per-100 000
-  resp_only   <- c("NO", "ES")                          # single source = RespiCompass
-  erviss_only <- c("SK", "LV")                          # single source = ERVISS
+# ---- |-the stitch rules as data (one definition, shared by every stitch function below) ----
+.stitch_rules <- list(
+  nonsentinel = c("MT", "IS", "HR", "RO", "LV", "FI"),   # ERVISS ILI+ uses NON-sentinel positivity
+  per_1000    = c("CY", "LU", "MT"),                     # per-100-consultations -> x1000 to per-100 000
+  resp_only   = c("NO", "ES"),                           # single source = RespiCompass
+  erviss_only = c("SK", "LV")                            # single source = ERVISS
+)
 
+# ---- |-A DATA-QUALITY FLAG: weeks whose influenza positivity cannot be computed ----
+#
+# THIS NEEDS CONFIRMATION FROM SURVEILLANCE COLLEAGUES. The question below is about what ECDC's
+# publication format MEANS, not about our code, and we are guessing.
+#
+# The raw ERVISS typing files encode a week with no influenza detections in TWO different ways:
+#   - 2083 sentinel (1068 non-sentinel) weeks state `detections = 0` explicitly;
+#   - 271 sentinel (438 non-sentinel) weeks report `tests > 0` with the detections row simply ABSENT.
+# Our positivity is re-derived as detections/tests, so the first becomes an observed zero and the
+# second becomes NA -- and an NA ILI+ week is DELETED by the stitch. Because the season grid ends at
+# the last finite week, a trailing run of them SHORTENS the season rather than leaving holes, with
+# nothing reporting it: CZ 2024/2025 ends at week 36 against 41-53 for its other seasons, so that
+# season contains no off-season at all and its ERVISS baseline is fitted without one.
+#
+# The two readings are:
+#   (a) an omitted detections row MEANS zero detections (consistent with the thousands of weeks that
+#       say 0 explicitly) -- then these weeks are observed zeros and none should be dropped;
+#   (b) it means the count is genuinely unknown for that week -- then dropping is right, but the
+#       trailing-run truncation is still wrong and should leave holes instead.
+# Which it is determines what the model is fitted to, so it is not ours to decide. Until it is
+# settled, jm_build_data EXCLUDES the affected country-seasons (owner, 2026-09-16) -- the
+# conservative choice, since it neither invents zeros nor fits a season on a truncated window.
+#
+# Returns one row per affected country-season, on the positivity stream that country's ILI+ actually
+# uses, so a non-sentinel country is judged on its non-sentinel file. A pure function of models_in.
+# WHICH WEEKS COULD REALLY HAVE BEEN ZERO. Analysed 2026-09-16 on the surrounding time series, at the
+# owner's suggestion, and the answer is not the same for every week -- so the exclusion is decided on
+# THAT rather than on a count of affected weeks, which would only separate the real cases by luck:
+#   - p_zero = P(0 detections | that week's tests, the local positivity of published weeks within
+#     +/- `nb_weeks`) under a binomial. Zero is called plausible at p_zero >= `p_plausible`.
+#   - a week with NO published neighbour is UNKNOWABLE from the data, not plausible: that is CZ from
+#     2025-03-26, whose detections feed went dark for the rest of the season.
+# Measured: zero is plausible for 82% of the 177 affected weeks that have neighbours, against 96% of
+# genuine explicit zeros -- so most absent rows do look like quiet weeks, but a minority cannot be.
+erviss_encoding_ambiguous <- function(models_in, nb_weeks = 3L, p_plausible = 0.05){
+  r <- .stitch_rules
+  x <- models_in$data_timeseries_long %>%
+    filter(pathogen == "Influenza", agegroup == "age_total",
+           indicator %in% c("detections", "tests"),
+           stream %in% c("typing_sentinel", "typing_nonsentinel")) %>%
+    select(country_short, season, season_week, date, stream, indicator, value) %>%
+    tidyr::pivot_wider(names_from = indicator, values_from = value)
+  empty <- data.frame(country_short = character(0), season = character(0), n_ambiguous = integer(0),
+                      n_not_plausibly_zero = integer(0), first_week = integer(0), last_week = integer(0),
+                      stringsAsFactors = FALSE)
+  if (!all(c("detections", "tests") %in% names(x))) return(empty)
+  # judge each country on the stream its own ILI+ is built from (.stitch_rules$nonsentinel)
+  x <- x %>%
+    mutate(used = ifelse(country_short %in% r$nonsentinel, "typing_nonsentinel", "typing_sentinel")) %>%
+    filter(stream == used) %>%
+    arrange(country_short, date)
+  x$ambiguous <- is.finite(x$tests) & x$tests > 0 & is.na(x$detections)
+  if (!any(x$ambiguous)) return(empty)
+  pub <- is.finite(x$detections) & is.finite(x$tests) & x$tests > 0      # weeks with a usable count
+  span <- as.numeric(nb_weeks) * 7
+  amb_i <- which(x$ambiguous)
+  x$p_zero <- NA_real_
+  for (i in amb_i){
+    nb <- pub & x$country_short == x$country_short[i] &
+          abs(as.numeric(x$date - x$date[i])) <= span & seq_len(nrow(x)) != i
+    if (!any(nb)) next                                       # no neighbour -> stays NA -> unknowable
+    tt <- sum(x$tests[nb]); if (tt <= 0) next
+    x$p_zero[i] <- (1 - sum(x$detections[nb]) / tt)^x$tests[i]
+  }
+  x %>% filter(ambiguous) %>%
+    group_by(country_short, season) %>%
+    summarise(n_ambiguous = dplyr::n(),
+              # the count that decides the exclusion: weeks that CANNOT plausibly have been zero,
+              # either because the local positivity makes zero implausible or because nothing was
+              # published nearby to judge against
+              n_not_plausibly_zero = sum(is.na(p_zero) | p_zero < p_plausible),
+              n_no_neighbour = sum(is.na(p_zero)),
+              min_p_zero = suppressWarnings(min(p_zero, na.rm = TRUE)),
+              first_week = min(season_week), last_week = max(season_week), .groups = "drop") %>%
+    mutate(min_p_zero = ifelse(is.finite(min_p_zero), min_p_zero, NA_real_)) %>%
+    arrange(desc(n_not_plausibly_zero), desc(n_ambiguous))
+}
+
+# ---- |-week-level stitched values for one or more age groups (the shared core) ----
+# Applies the source rules per week and age group; the per-country alignment factor is ALWAYS
+# estimated on the age TOTAL (the panel's definition) and applied to every band, so age-specific
+# series stay on the panel's scale. Returns country_short, season, date, season_week, agegroup,
+# value, source (all requested agegroups; no season filtering, no week grid).
+.stitch_iliplus_weeks <- function(models_in, agegroups = "age_total", overlap_season = "2023/2024"){
+  r <- .stitch_rules
   ili_plus <- models_in$data_timeseries_long %>%
-    filter(indicator=="ili_plus", pathogen=="Influenza", agegroup=="age_total") %>%
-    select(stream, country_short, season, date, season_week, value)
+    filter(indicator=="ili_plus", pathogen=="Influenza", agegroup %in% union("age_total", agegroups)) %>%
+    select(stream, country_short, season, date, season_week, agegroup, value)
 
   erviss <- ili_plus %>% filter(stream %in% c("ili_plus_sentinel","ili_plus_nonsentinel")) %>%
-    mutate(chosen_stream = ifelse(country_short %in% nonsentinel, "ili_plus_nonsentinel", "ili_plus_sentinel")) %>%
+    mutate(chosen_stream = ifelse(country_short %in% r$nonsentinel, "ili_plus_nonsentinel", "ili_plus_sentinel")) %>%
     filter(stream==chosen_stream) %>%
-    mutate(value = value * ifelse(country_short %in% per_1000, 1000, 1)) %>%
-    transmute(country_short, season, date, season_week, erviss = value)
+    mutate(value = value * ifelse(country_short %in% r$per_1000, 1000, 1)) %>%
+    transmute(country_short, season, date, season_week, agegroup, erviss = value)
   respicompass <- ili_plus %>% filter(stream=="ili_plus_respicompass") %>%
-    transmute(country_short, season, date, season_week, respicompass = value)
+    transmute(country_short, season, date, season_week, agegroup, respicompass = value)
 
-  combined <- full_join(erviss, respicompass, by=c("country_short","season","date","season_week"))
+  combined <- full_join(erviss, respicompass, by=c("country_short","season","date","season_week","agegroup"))
 
-  # per-country alignment factor from the overlap season (median RespiCompass / ERVISS over weeks where BOTH streams are finite and > 0)
-  align_factors <- combined %>% filter(season==overlap_season, is.finite(erviss), erviss>0, is.finite(respicompass), respicompass>0) %>%
+  # per-country alignment factor from the overlap season, on the TOTAL (median RespiCompass / ERVISS over weeks where BOTH streams are finite and > 0)
+  align_factors <- combined %>% filter(agegroup=="age_total", season==overlap_season, is.finite(erviss), erviss>0, is.finite(respicompass), respicompass>0) %>%
     group_by(country_short) %>% summarise(align_factor = median(respicompass/erviss), .groups="drop")
 
-  combined <- combined %>% left_join(align_factors, by="country_short") %>%
+  combined %>% left_join(align_factors, by="country_short") %>%
     mutate(align_factor = ifelse(is.na(align_factor), 1, align_factor),
-           value  = case_when(country_short %in% resp_only   ~ respicompass,
-                              country_short %in% erviss_only ~ erviss,               # native ERVISS scale
+           value  = case_when(country_short %in% r$resp_only   ~ respicompass,
+                              country_short %in% r$erviss_only ~ erviss,             # native ERVISS scale
                               !is.na(respicompass) ~ respicompass,                   # default: RespiCompass where present
                               TRUE        ~ erviss * align_factor),                  # default ERVISS era, aligned to RespiCompass
-           source = case_when(country_short %in% resp_only   ~ "RespiCompass",
-                              country_short %in% erviss_only ~ "ERVISS",
-                              !is.na(respicompass) ~ "RespiCompass", TRUE ~ "ERVISS"))
+           source = case_when(country_short %in% r$resp_only   ~ "RespiCompass",
+                              country_short %in% r$erviss_only ~ "ERVISS",
+                              !is.na(respicompass) ~ "RespiCompass", TRUE ~ "ERVISS")) %>%
+    filter(agegroup %in% agegroups) %>%
+    select(country_short, season, date, season_week, agegroup, value, source, align_factor)
+}
+
+stitch_iliplus_panel <- function(models_in, exclude_covid = TRUE, min_wk = 15,
+                                 overlap_season = "2023/2024"){
+  combined <- .stitch_iliplus_weeks(models_in, "age_total", overlap_season) %>%
+    select(country_short, season, date, season_week, value, source)
   if (exclude_covid) combined <- combined %>% filter(!season %in% stitch_covid_seasons)
   combined <- combined %>% filter(is.finite(value))
 
@@ -72,4 +166,20 @@ stitch_iliplus_panel <- function(models_in, exclude_covid = TRUE, min_wk = 15,
         transmute(week = season_week, season_week, date, value, source = season_source)
     }) %>% ungroup() %>%
     arrange(country_short, season, week)
+}
+
+# ---- |-age-specific stitched series for the committed panel's country-seasons ----
+# For the compartmental model (code/06_comp_model): the same per-week source rules and the same
+# total-based alignment factor as the panel, evaluated for the four ILI age bands, restricted to
+# the country-seasons that are IN the committed panel (inclusion decided on the total, as the panel
+# does), and laid on the panel's contiguous weekly grid (weeks absent from a band are NA).
+# Returns country_short, season, week, agegroup, value (rate per 100 000 of the band), source.
+stitch_iliplus_by_age <- function(models_in, panel = read.csv("data/slim_flu_iliplus.csv", stringsAsFactors=FALSE),
+                                  agegroups = c("age_00_04","age_05_14","age_15_64","age_65_99")){
+  weeks <- .stitch_iliplus_weeks(models_in, agegroups) %>% filter(is.finite(value)) %>%
+    select(country_short, season, week = season_week, agegroup, value)
+  grid <- panel %>% distinct(country_short, season, week, source)          # the panel's grid + season source label
+  tidyr::crossing(grid, agegroup = agegroups) %>%
+    left_join(weeks, by = c("country_short","season","week","agegroup")) %>%
+    arrange(country_short, season, agegroup, week)
 }

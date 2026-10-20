@@ -1,9 +1,13 @@
-# flu_seasonal_variation_analysis
+# flu_seasonal_variation_analysis: code and methods
+
+The project is described on one page in the [project one-pager](../README_project.md), and its data needs,
+each with its sources and coverage, under [`data/`](../data/README_data.md). This guide covers the code:
+what it does, how to run it, and where everything lives.
 
 Characterising the **drivers of inter-seasonal variability** of seasonal influenza across the
 EU/EEA — 166 country-seasons of real surveillance data turned into per-season wave features, then
 related to candidate drivers (dominant subtype, vaccine effectiveness, 65+ coverage, prior-season
-burden). Research aim and scope: `PROJECT_SCOPE.md`.
+burden). Research aim and scope: `documentation/PROJECT_SCOPE.md`.
 
 > Renamed from `flu-susceptible-fit` (2026-08) to match the project purpose. Two related
 > repositories share history with this one:
@@ -116,14 +120,57 @@ code/03_report/                eyeballing_report.Rmd (data-quality / dynamics re
 code/04_modelling/             build_slim_panel.R (write the committed panel via the shared stitch),
                                fit_methods_demo.R (every method, all seasons), descriptive_overview.R,
                                ekf_overview.R
+code/07_joint_model/           THE WORKING MODEL (branch flu_comp_model): all countries and seasons
+                               fitted jointly. MODEL.md (START HERE: sections 1-7 the model as it
+                               stands and what it learned, section 8 a guide to the figures,
+                               appendices A-L the dated investigations), joint_model.cpp (the entire
+                               log-posterior in C++), joint_model.R (data, packing, block-coordinate
+                               fitting, the flat-line protector, identifiability and adequacy
+                               diagnostics), joint_recovery.R (intervals; simulate-and-recover, the
+                               misspecification arms that make the test able to FAIL, and the driver
+                               hook for the learning layer), joint_report.R (the default numbered
+                               figure set), run_joint_model.R, run_joint_recovery.R;
+                               joint_compare.R (model comparison with the wave as the unit),
+                               run_pin_sweep.R (what the R0 pin's value does), run_prior_stress.R
+                               (are the season results the data's or the priors'?),
+                               run_kappa_profile.R (the children's S0 modifier: what the data say,
+                               and the calibration of its prior against PHIRST); report/ (the
+                               printable report: report_figures.R, REPORT.md, build_report.sh ->
+                               documentation/joint_model_report.pdf). (The S0-vs-R0
+                               sensing comparison, figure 17, lives at commit 7b04681; the fitted
+                               spatial-spread analysis, figure 18, at commit c9286b7.)
+code/06_comp_model/            the compartmental PILOT that preceded it, kept for its assumption
+                               record and its data layer (build_comp_data is still used):
+                               ASSUMPTIONS.md (every assumption, with provenance and evidence),
+                               comp_model_settings.R, contact_matrix.R (exact-R0 scaling),
+                               comp_model_core.R (R reference) + comp_model_core.cpp (identical
+                               C++ engine), comp_model_data.R, comp_model_fit.R (two-stage EKF),
+                               comp_model_report.R (eyeballing figures), run_comp_model.R,
+                               run_age_experiment.R (age-specific reporting vs susceptibility,
+                               12 countries, against the PHIRST attack-rate profile),
+                               comp_model_joint.R + run_comp_model_joint.R (shared season R0)
 code/05_analysis/              the driver analysis: analysis_helpers.R (shared Gibbs samplers, rhat,
                                VE-vs-dominant rule), prepare_descriptors.R, dominant_subtype.R,
                                analyse_patterns.R, plot_patterns.R, plot_vax_scatter.R,
                                hierarchical_models.R, bayes_subtype.R, subtype_8season.R,
                                bayes_prior_burden.R, bayes_precovid_ve_subtype.R,
                                precovid_predict_postcovid.R
+code/08_flu_hospitalisation/  the influenza-hospitalisation indicators: fetch_sources.sh (every input
+                               pinned to a commit), build_erviss.py (ERVISS merged across its dated
+                               releases, SARI+), build_national.py (seven national series),
+                               build_coverage.py (indicator classes, best per country-season),
+                               reconcile.py (national against ERVISS), plot_coverage.R, plot_series.R;
+                               build_all.sh runs them all -> data/flu_hospitalisation_indicators/
+code/09_erviss_history/        ERVISS primary-care files merged across its releases, from 2014/15:
+                               fetch_releases.sh (the last release of each ERVISS window, pinned),
+                               merge_releases.py (ILI and ARI rates; influenza tests and detections),
+                               compare_iliplus.py (ERVISS ILI+ against RespiCompass's), plot_history.R;
+                               build_all.sh -> data/primary_care_ili_rates/, data/primary_care_flu_positivity/
 stan/                          SIR_multiseason_age_vax_2.stan (Bayesian SIR)
-data/                          committed ERVISS / RespiCompass snapshots + slim_flu_iliplus.csv
+data/                          one folder per data need of the one-pager, each with a README (index:
+                               data/README_data.md), holding the committed ERVISS snapshots and the
+                               hospitalisation indicators; at the top level slim_flu_iliplus.csv, the
+                               RespiCompass, vaccination, contact and demography inputs
                                (+ data/external/ driver tables with provenance)
 output/                        cached data lists + figures (gitignored, regenerated)
 tests/testthat/                contract + method + panel + parameter-recovery tests
@@ -137,16 +184,21 @@ Where each kind of information lives:
 
 | File | Holds |
 |---|---|
-| `README.md` | what the repo does, quick start, the method framework, layout |
+| `README_project.md` (repository root) | **the project on one page**: team, justification, data needs (each linked to its data folder), objectives, scope |
+| `code/README_code.md` (this file) | what the code does, quick start, the method framework, layout |
+| `data/README_data.md` and `data/<need>/README_<need>.md` | each data need: source, how it was retrieved, coverage, caveats |
 | `documentation/quickstart.md` | how to set up and run |
 | `documentation/data_overview.md` | what data is present (`data`, `models_in`, indicators) |
 | `documentation/documentation.Rmd` | the model maths / science (SIR, inference, contact matrix) |
+| `documentation/joint_model_report.pdf` | **the printable status report** of the joint model (A4, 16 pages): data, evidence, model, behaviour and fit, with every figure; built by `code/07_joint_model/report/` |
+| `code/07_joint_model/MODEL.md` | the WORKING model: its abstract, what varies where, what was cut and why, and whether it recovers a known truth |
 | `documentation/decisions.md` | **why** — rationale for key modelling / method / data decisions |
+| `documentation/to_confirm_with_surveillance.md` | **what we inferred rather than know** — open questions about what the source data MEAN, for surveillance colleagues, with what changes under each answer |
 | `documentation/analysis_strategy.md` | the driver analysis — strategy, principles, what we've learned, ranked next steps |
 | `documentation/findings_descriptors.md` | results of the descriptor / driver analyses |
 | `documentation/external_drivers.md` | externally-sourced drivers (subtype, vaccination, climate, VE) — provenance, values, caveats |
 | `documentation/reflections.md` | project-relevance thoughts / interpretations / pondering (also inline `[REFLECTION]` tags) |
-| `PROJECT_SCOPE.md` | project scope (in / out of scope), research aim, references |
+| `documentation/PROJECT_SCOPE.md` | the longer project background, research aim, scope, references |
 | inline header comments | why each function / file works the way it does |
 
 New design decisions go in `documentation/decisions.md` (append-only), so the reasoning is kept

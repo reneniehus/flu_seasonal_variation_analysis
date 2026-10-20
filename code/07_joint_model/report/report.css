@@ -1,0 +1,83 @@
+/* report.css -- print styles for the A4 report (build_report.sh). Chromium prints it; the page
+   furniture uses CSS paged media (margin boxes with page counters). */
+@page {
+  size: A4;
+  margin: 19mm 18mm 19mm 18mm;
+  @top-left     { content: "Joint EU/EEA influenza model"; font: 7.8pt "Source Sans 3", "Liberation Sans", sans-serif; color: #77756f; }
+  @top-right    { content: "Status report, 27 September 2026"; font: 7.8pt "Source Sans 3", "Liberation Sans", sans-serif; color: #77756f; }
+  @bottom-center{ content: counter(page) " / " counter(pages); font: 8pt "Source Sans 3", "Liberation Sans", sans-serif; color: #77756f; }
+}
+@page :first { @top-left { content: none; } @top-right { content: none; } }
+
+:root {
+  --ink: #1b1b1a; --ink-2: #3d3c39; --muted: #6b6963; --rule: #d9d7d0; --rule-strong: #2a2a28;
+  --tint: #f4f6f9; --accent: #2a78d6;
+  --sans: "Source Sans 3", "Liberation Sans", sans-serif;
+  --serif: "Source Serif 4", "Liberation Serif", serif;
+}
+html { font-size: 9.7pt; }
+body { margin: 0; background: #fff; color: var(--ink); font-family: var(--serif); line-height: 1.43;
+       font-kerning: normal; hyphens: auto; -webkit-hyphens: auto; text-rendering: optimizeLegibility; }
+
+/* ---- title block ---- */
+.titleblock { margin: 0 0 14pt; padding-bottom: 12pt; border-bottom: 1.2pt solid var(--rule-strong); }
+.kicker { font-family: var(--sans); font-size: 8.5pt; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+h1.title { font-family: var(--sans); font-size: 22pt; line-height: 1.12; margin: 6pt 0 6pt; font-weight: 700; letter-spacing: -0.01em; }
+.subtitle { font-family: var(--sans); font-size: 12pt; line-height: 1.3; color: var(--ink-2); display: block; }
+.meta { font-family: var(--sans); font-size: 8pt; color: var(--muted); display: block; margin-top: 8pt; }
+
+.keynums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin: 0 0 12pt;
+           border-top: 0.6pt solid var(--rule); border-bottom: 0.6pt solid var(--rule); }
+.kn { padding: 7pt 8pt 7pt 0; }
+.kn + .kn { padding-left: 10pt; border-left: 0.6pt solid var(--rule); }
+.kn .n { display: block; font-family: var(--sans); font-size: 15pt; font-weight: 700; line-height: 1.1; }
+.kn .l { display: block; font-family: var(--sans); font-size: 7.8pt; line-height: 1.3; color: var(--muted); margin-top: 2pt; }
+
+.abstract { background: var(--tint); padding: 9pt 11pt; margin: 0 0 12pt; }
+.abstract p { margin: 0 0 5pt; }
+.abstract p:last-child { margin-bottom: 0; }
+
+/* ---- headings and text ---- */
+h2, h3, h4 { font-family: var(--sans); color: #111; line-height: 1.2; break-after: avoid; page-break-after: avoid; }
+h2 { font-size: 14pt; font-weight: 700; margin: 16pt 0 6pt; padding-top: 5pt; border-top: 1.2pt solid var(--rule-strong); }
+h3 { font-size: 10.8pt; font-weight: 600; margin: 11pt 0 3pt; }
+h2.pb { break-before: page; page-break-before: always; margin-top: 0; }
+p { margin: 0 0 5.5pt; orphans: 3; widows: 3; }
+ul, ol { margin: 0 0 6pt; padding-left: 14pt; }
+li { margin: 0 0 2.5pt; }
+li > p { margin: 0; }
+strong { font-weight: 700; }
+sub, sup { font-size: 70%; line-height: 0; }
+code { font-family: "DejaVu Sans Mono", monospace; font-size: 7.8pt; }
+pre { font-family: "DejaVu Sans Mono", monospace; font-size: 7.6pt; line-height: 1.4; background: var(--tint);
+      padding: 7pt 9pt; margin: 4pt 0 8pt; white-space: pre-wrap; break-inside: avoid; }
+pre code { font-size: inherit; }
+a { color: inherit; text-decoration: none; }
+
+.eq { font-family: var(--serif); text-align: center; margin: 5pt 0 7pt; font-size: 10pt; }
+.eq p { margin: 2pt 0; }
+.note { font-family: var(--sans); font-size: 8.4pt; color: var(--ink-2); }
+
+/* ---- figures ---- */
+figure { margin: 8pt 0 11pt; break-inside: avoid; page-break-inside: avoid; }
+figure img { width: 100%; display: block; }
+figcaption { font-family: var(--sans); font-size: 8.3pt; line-height: 1.36; color: var(--ink-2); margin-top: 4pt; }
+.full figure img { width: 100%; }
+
+/* ---- tables ---- */
+table { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: 8.3pt; line-height: 1.3;
+        margin: 5pt 0 10pt; break-inside: avoid; page-break-inside: avoid; font-variant-numeric: tabular-nums lining-nums; }
+caption { caption-side: top; text-align: left; font-family: var(--sans); font-size: 8.3pt; color: var(--ink-2);
+          padding-bottom: 4pt; line-height: 1.36; }
+thead th { text-align: left; font-weight: 600; border-bottom: 0.8pt solid var(--rule-strong); padding: 3pt 7pt 3pt 0;
+           vertical-align: bottom; }
+tbody td { border-bottom: 0.4pt solid var(--rule); padding: 2.6pt 7pt 2.6pt 0; vertical-align: top; }
+tbody tr:last-child td { border-bottom: 0.8pt solid var(--rule-strong); }
+td:last-child, th:last-child { padding-right: 0; }
+
+.refs { font-size: 8.4pt; line-height: 1.38; }
+.refs ol { padding-left: 16pt; }
+.refs li { margin-bottom: 2pt; }
+.cols2 { column-count: 2; column-gap: 16pt; }
+h2 + figure, h2 + .full { margin-top: 4pt; }
+.refs + h3, .refs ~ h3 { margin-top: 12pt; }

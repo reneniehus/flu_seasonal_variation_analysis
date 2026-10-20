@@ -8,7 +8,9 @@ ISO-week Wednesday `date`. Seasons run Aug 1 -> Jul 31 (configurable in the sett
 
 ### `data$epi` — ECDC ERVISS + RespiCompass surveillance
 Loaded via the registry in `code/01_main_supporting/load_data.R` (add a row -> new stream).
-Source: <https://github.com/EU-ECDC/Respiratory_viruses_weekly_data>.
+Source: <https://github.com/EU-ECDC/Respiratory_viruses_weekly_data>. Snapshots that serve a data need
+of the project one-pager sit in that need's folder under `data/`, with a README on source, coverage
+and caveats (index: `data/README_data.md`).
 
 | key | file | schema | contents |
 |---|---|---|---|
