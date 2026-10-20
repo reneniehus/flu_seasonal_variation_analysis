@@ -13,15 +13,10 @@
 
 ## Justification (problem/opportunity, alignment with team and organisation goals)
 
-- Before each winter, EU/EEA authorities plan vaccination and healthcare capacities in response to
-  seasonal virus burden in the absence of reliable predictions.
-- Forecasts provided by ECDC's RespiCast are only short term, and long-term prediction of viral burden
-  has proved highly challenging
-- As a step towards understanding viral circulation and burden patterns, we focus here on influenza
-  and carefully analyse historical variation of relevant indicators across seasons and across the
-  EU/EEA
-- By examining the association between such variation and plausible drivers of viral burden, we
-  generate hypothesis about the predictable nature of seasonal influenza burden.
+-   Before each winter, EU/EEA authorities plan vaccination and healthcare capacities in response to seasonal virus burden. This planning has to be done in the absence of reliable burden predictions.
+-   This is because forecasts provided by ECDC's RespiCast are only short term, and long-term prediction of viral burden has proved highly challenging.
+-   As a step towards understanding viral circulation and burden patterns, we focus here on influenza and carefully analyse historical variation of relevant indicators across seasons and across the EU/EEA.
+-   By examining the association between such variation and plausible drivers of viral burden, we generate hypothesis about the predictable nature of seasonal influenza burden.
 
 ## Data needs
 
@@ -35,16 +30,10 @@
 
 ## Objectives (SMART: specific, measurable, achievable, relevant, time-bound) and Deliverables
 
-1. Determine surveillance indicators that correlate with severe disease burden caused by influenza: by
-   mid-December 2026 produce a 1-page report that establishes a selection of influenza indicators
-   based on discussion with surveillance and disease experts and evidence on temporal correlation
-   between influenza-related indicators.
-2. By end of February 2027, produce a descriptive 2-page report of relevant influenza indicator(s)
-   dynamics for all country-seasons.
-3. By end of March 2027, examine whether plausible seasonal drivers of influenza burden relate to
-   between season variation. Through discussing these results with disease experts, this may generate
-   hypothesis about the predictability of future influenza season.
-4. The resulting hypotheses and supporting evidence are presented in a 2–4-page technical brief.
+1.  Determine relevant influenza indicators: we establish for each EU/EEA country (where possible) a surveillance indicator that correlated with severe disease burden caused by influenza. This is done through combining evidence from temporal correlation between between age-disaggregated indicators (including all-cause mortality, secondary care, and primary care indicators) and discussions with surveillance and disease experts. The result is a 1-page report by mid-January 2027. \
+    surveillance indicators that correlate with severe disease burden caused by influenza.
+2.  Describing patterns and trends of influenza indicators: we describe dynamics of influenza indicators across the EU/EEA using season-specific attributes (e.g., onset timing, peak timing, steepness). We then examine how those attributes relate to one another across seasons and across the EU/EEA, we examine how specific seasons were different across the EU/EEA, and how specific countries were different when compared to the others. We perform this analysis without imposing any mechanistic representation of viral spread (e.g., no mechanistic model fitting). The result is a 2-page descriptive report of influenza indicator dynamics for all available country-seasons.
+3.  Correlation analysis and building causal hypotheses: we correlate the observed patterns of influenza burden indicators with plausible biological drivers and descriptors or surveillance systems. Through discussing the results with disease experts and re-adjusted analysis of correlations, we generate hypothesis about the mechanistic drivers underlying influenza burden indicator. This allows discussions of how these mechanisms could be further investigated and how they could aid predictability of future influenze burden. The result is a 2-4 page technical brief summarising methods, results, discussion and future steps.
 
 ## Scope
 
