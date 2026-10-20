@@ -25,11 +25,11 @@
 
 ## Data needs
 
-- [Primary care ILI rates](data/primary_care_ili_rates/README.md) \[season,country,week,age\]
-- [Primary care test positivity for flu](data/primary_care_flu_positivity/README.md) \[season,country,week\]
-- [SARI rates](data/sari_rates/README.md) \[season,country,week,age\]
-- [SARI test positivity for flu](data/sari_flu_positivity/README.md) \[season,country,week\]
-- [Diverse influenza hospitalisation indicators](data/flu_hospitalisation_indicators/README.md) \[season,country\]
+- [Primary care ILI rates](data/primary_care_ili_rates/README_primary_care_ili_rates.md) \[season,country,week,age\]
+- [Primary care test positivity for flu](data/primary_care_flu_positivity/README_primary_care_flu_positivity.md) \[season,country,week\]
+- [SARI rates](data/sari_rates/README_sari_rates.md) \[season,country,week,age\]
+- [SARI test positivity for flu](data/sari_flu_positivity/README_sari_flu_positivity.md) \[season,country,week\]
+- [Diverse influenza hospitalisation indicators](data/flu_hospitalisation_indicators/README_flu_hospitalisation_indicators.md) \[season,country\]
 - Dominant influenza subtype \[season,country\]
 - Influenza vaccination coverage \[season,country\]
 
@@ -79,8 +79,8 @@
 ---
 
 **In this repository.**
-- **Data:** each data need above links to its folder under [`data/`](data/README.md).
-- **Code and methods, and how to run them:** [`code/README.md`](code/README.md).
+- **Data:** each data need above links to its folder under [`data/`](data/README_data.md).
+- **Code and methods, and how to run them:** [`code/README_code.md`](code/README_code.md).
 - **Longer background and references:**
   [`documentation/PROJECT_SCOPE.md`](documentation/PROJECT_SCOPE.md).
 - **Why things were done as they were:** [`documentation/decisions.md`](documentation/decisions.md).

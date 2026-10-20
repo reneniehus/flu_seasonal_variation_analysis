@@ -1,6 +1,6 @@
 # Drivers of inter-seasonal variability in seasonal influenza across the EU/EEA: a retrospective analysis
 
-> The project is summarised on one page in the [repository README](../README.md). This document
+> The project is summarised on one page in the [project one-pager](../README_project.md). This document
 > gives the longer background, the research questions and the references.
 
 ## Background and rationale
@@ -79,9 +79,9 @@ drivers (climate, subtype novelty, vaccine effectiveness) are the next stage.
 
 ## Repository
 
-How to run, the data layer and the method framework are documented in `code/README.md` and
+How to run, the data layer and the method framework are documented in `code/README_code.md` and
 `documentation/` (quickstart, data overview, the model maths). The data needs, each with its sources
-and coverage, are under `data/` (index: `data/README.md`). Key design choices and their rationale are
+and coverage, are under `data/` (index: `data/README_data.md`). Key design choices and their rationale are
 recorded in `documentation/decisions.md`.
 
 ## Key references and related work

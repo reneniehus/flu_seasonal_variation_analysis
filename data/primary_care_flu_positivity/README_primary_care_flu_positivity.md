@@ -1,6 +1,6 @@
 # Primary care test positivity for influenza
 
-Data need from the [project one-pager](../../README.md#data-needs): *primary care test positivity for
+Data need from the [project one-pager](../../README_project.md#data-needs): *primary care test positivity for
 flu [season, country, week]*.
 
 **Source.** ERVISS (ECDC), file `sentinelTestsDetectionsPositivity.csv`. It holds weekly influenza
@@ -29,7 +29,7 @@ pathogen, pathogentype, pathogensubtype, indicator, age, value`.
 - **Indicators:** `tests`, `detections`, `positivity`.
 - **Ages:** all ages only.
 - **Merged files:** influenza rows only, with two extra columns, `release` and `dropped_later`, as for
-  the [ILI rates](../primary_care_ili_rates/README.md#files).
+  the [ILI rates](../primary_care_ili_rates/README_primary_care_ili_rates.md#files).
 
 **Loading.** [`load_data.R`](../../code/01_main_supporting/load_data.R) loads the snapshots as
 `data$epi$erviss_typing_sentinel` and `data$epi$erviss_typing_nonsentinel`. The merged files are not
@@ -45,7 +45,7 @@ choice for the same six countries. Whether that is right is
 ## How the merged series was built
 
 The method is the same as for the ILI rates, with the same four ERVISS releases; see
-[that README](../primary_care_ili_rates/README.md#how-the-merged-series-was-built). The script is
+[that README](../primary_care_ili_rates/README_primary_care_ili_rates.md#how-the-merged-series-was-built). The script is
 [`merge_releases.py`](../../code/09_erviss_history/merge_releases.py).
 
 **Checks**
@@ -98,15 +98,15 @@ uses the non-sentinel stream.
   around season week 42. Most countries now test all year: 15 of 26 had at least 45 tested weeks in
   2023/24, against 3 in 2018/19. Pre-COVID-19 ILI+ can therefore only cover the winter, from ERVISS
   as from RespiCompass (see
-  [the comparison](../primary_care_ili_rates/README.md#erviss-ili-against-respicompass-ili)).
+  [the comparison](../primary_care_ili_rates/README_primary_care_ili_rates.md#erviss-ili-against-respicompass-ili)).
 - **Few sentinel tests:** Bulgaria, Finland, Greece, Lithuania, Romania and Slovakia have medians
   below 10 tests a week, so their weekly positivity is noisy.
 - **No real sentinel stream:** Croatia, Iceland, Latvia and Malta have essentially none.
 
 ## Related
 
-- [Primary care ILI rates](../primary_care_ili_rates/README.md): ILI+ is ILI rate × this positivity.
-- [SARI test positivity](../sari_flu_positivity/README.md): the same measure among hospitalised SARI
+- [Primary care ILI rates](../primary_care_ili_rates/README_primary_care_ili_rates.md): ILI+ is ILI rate × this positivity.
+- [SARI test positivity](../sari_flu_positivity/README_sari_flu_positivity.md): the same measure among hospitalised SARI
   patients.
 - [Open questions 1 and 4](../../documentation/to_confirm_with_surveillance.md): what an absent
   detections row means, and the choice of non-sentinel tests.

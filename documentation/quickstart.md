@@ -103,7 +103,7 @@ code/08_flu_hospitalisation/   influenza-hospitalisation indicators (build_all.s
 code/09_erviss_history/        ERVISS ILI rates and positivity merged across releases, from 2014/15 (build_all.sh)
 stan/                          SIR_multiseason_age_vax_2.stan (Bayesian SIR)
 data/                          committed raw snapshots (offline bootstrap); one folder per data need,
-                               each with a README (index: data/README.md)
+                               each with a README (index: data/README_data.md)
 output/                        cached data lists (gitignored, regenerated)
 tests/testthat/                contract + invariant tests
 documentation/                 quickstart, data_overview, decisions, analysis_strategy,

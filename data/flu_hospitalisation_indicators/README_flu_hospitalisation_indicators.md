@@ -1,6 +1,6 @@
 # Influenza hospitalisation indicators
 
-Data need from the [project one-pager](../../README.md#data-needs): *diverse influenza hospitalisation
+Data need from the [project one-pager](../../README_project.md#data-needs): *diverse influenza hospitalisation
 indicators [season, country]*. This folder holds every influenza-specific hospital series we could
 find in machine-readable form, cleaned onto one weekly (or monthly) layout. It also documents how they
 were found and how far they can be trusted.

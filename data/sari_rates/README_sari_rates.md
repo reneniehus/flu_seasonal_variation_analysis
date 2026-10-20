@@ -1,13 +1,13 @@
 # SARI rates
 
-Data need from the [project one-pager](../../README.md#data-needs): *SARI rates [season, country, week,
+Data need from the [project one-pager](../../README_project.md#data-needs): *SARI rates [season, country, week,
 age]*.
 
 **Source.** ERVISS (ECDC), file `SARIRates.csv`. It holds weekly rates of severe acute respiratory
 infection (SARI) among patients admitted to sentinel hospitals, by age group. The rate counts SARI of
 any cause, so on its own it is not influenza-specific. Multiplied by the influenza positivity of SARI
-samples it becomes SARI+; see [SARI test positivity](../sari_flu_positivity/README.md) and the
-[hospital indicators](../flu_hospitalisation_indicators/README.md).
+samples it becomes SARI+; see [SARI test positivity](../sari_flu_positivity/README_sari_flu_positivity.md) and the
+[hospital indicators](../flu_hospitalisation_indicators/README_flu_hospitalisation_indicators.md).
 
 **Search scope.** Only ERVISS was used. No wider search has been done for this data need.
 
@@ -58,7 +58,7 @@ SARI rate, all ages: weeks with data per season.
 ## A longer series
 
 **Earliest SARI data.** ERVISS's SARI data start at 2020-W40. The
-[hospital indicators](../flu_hospitalisation_indicators/README.md) folder merges every SARI snapshot
+[hospital indicators](../flu_hospitalisation_indicators/README_flu_hospitalisation_indicators.md) folder merges every SARI snapshot
 since 2024-11 with the current file. Its
 [`erviss_flu_hospital_weekly.csv`](../flu_hospitalisation_indicators/erviss_flu_hospital_weekly.csv)
 (indicator `sari_rate`) therefore runs from 2020-W40 to 2026-W40, longer than the snapshot here.
@@ -71,7 +71,7 @@ Both were found by the hospital-indicator search; neither is merged here.
 
 ## Related
 
-- [SARI test positivity](../sari_flu_positivity/README.md): makes this rate influenza-specific
+- [SARI test positivity](../sari_flu_positivity/README_sari_flu_positivity.md): makes this rate influenza-specific
   (SARI+).
-- [Influenza hospitalisation indicators](../flu_hospitalisation_indicators/README.md): SARI+ for each
+- [Influenza hospitalisation indicators](../flu_hospitalisation_indicators/README_flu_hospitalisation_indicators.md): SARI+ for each
   country, with the national series.

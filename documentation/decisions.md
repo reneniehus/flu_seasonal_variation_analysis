@@ -1,6 +1,6 @@
 # Design decisions & rationale
 
-`code/README.md` records *what* the repo does and how to run it; this file records *why* the key
+`code/README_code.md` records *what* the repo does and how to run it; this file records *why* the key
 modelling, method and data choices were made, so the reasoning survives beyond commit messages and
 chat. Append new decisions as they are made. Keep each entry short: the **decision**, the reason,
 and the main alternative considered.
@@ -1292,7 +1292,7 @@ one-pager, *Analysing seasonal variation in influenza burden across the EU/EEA*.
 - **The one-pager is `README.md`.** Each data need it lists links to a folder under `data/`. That
   folder holds the data and a README covering the source, how the data were retrieved, coverage and
   caveats.
-- **Displaced documents.** The previous technical README is now `code/README.md`, and
+- **Displaced documents.** The previous technical README is now `code/README_code.md`, and
   `PROJECT_SCOPE.md` moved to `documentation/`.
 - **The ERVISS snapshots moved into their data-need folders, unchanged:**
   - ILI rates;
@@ -1358,3 +1358,16 @@ is the same rule as for the hospital indicators.
   ×1000 for Cyprus and Luxembourg. It differs for Malta, Finland and Latvia.
 - **The pre-COVID-19 series end where sentinel testing ended**, about season week 41–42. This is
   evidence on open questions 3, 4 and 6 in `to_confirm_with_surveillance.md`.
+
+## 2026-10-20 -- README files named after what they describe
+
+**Owner decision.** Every README file carries a unique name that says what it describes:
+- `README_project.md` is the project one-pager, at the top of the hierarchy, and the only project-level
+  README.
+- `code/README_code.md` is the guide to the code.
+- `data/README_data.md` is the index of the data needs.
+- `data/<need>/README_<need>.md` describes one data need, for example
+  `data/sari_rates/README_sari_rates.md`.
+
+Every link was updated. One consequence: GitHub shows a folder's front page only for a file named
+exactly `README.md`, so no page now opens automatically on GitHub.

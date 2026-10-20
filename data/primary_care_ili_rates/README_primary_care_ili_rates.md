@@ -1,6 +1,6 @@
 # Primary care ILI rates
 
-Data need from the [project one-pager](../../README.md#data-needs): *primary care ILI rates
+Data need from the [project one-pager](../../README_project.md#data-needs): *primary care ILI rates
 [season, country, week, age]*.
 
 **Source.** ERVISS (ECDC), file
@@ -62,7 +62,7 @@ three times, which was found by opening the releases either side of each change:
 release of each window with the current file. For every country, week, indicator and age group, it
 keeps the value from the newest release that has one. Every week therefore carries its last-published
 value. This is the same rule as for the
-[hospital indicators](../flu_hospitalisation_indicators/README.md#1-erviss).
+[hospital indicators](../flu_hospitalisation_indicators/README_flu_hospitalisation_indicators.md#1-erviss).
 
 **Pinned inputs.** [`fetch_releases.sh`](../../code/09_erviss_history/fetch_releases.sh) pins the
 ERVISS repository commit and the four releases.
@@ -163,6 +163,6 @@ panel, so it is left as an option.
 
 ## Related
 
-- [Primary care test positivity](../primary_care_flu_positivity/README.md): the other half of ILI+,
+- [Primary care test positivity](../primary_care_flu_positivity/README_primary_care_flu_positivity.md): the other half of ILI+,
   merged the same way.
 - [Open questions about these data](../../documentation/to_confirm_with_surveillance.md).

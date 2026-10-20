@@ -1,7 +1,7 @@
 # flu_seasonal_variation_analysis: code and methods
 
-The project is described on one page in the [repository README](../README.md), and its data needs,
-each with its sources and coverage, under [`data/`](../data/README.md). This guide covers the code:
+The project is described on one page in the [project one-pager](../README_project.md), and its data needs,
+each with its sources and coverage, under [`data/`](../data/README_data.md). This guide covers the code:
 what it does, how to run it, and where everything lives.
 
 Characterising the **drivers of inter-seasonal variability** of seasonal influenza across the
@@ -168,7 +168,7 @@ code/09_erviss_history/        ERVISS primary-care files merged across its relea
                                build_all.sh -> data/primary_care_ili_rates/, data/primary_care_flu_positivity/
 stan/                          SIR_multiseason_age_vax_2.stan (Bayesian SIR)
 data/                          one folder per data need of the one-pager, each with a README (index:
-                               data/README.md), holding the committed ERVISS snapshots and the
+                               data/README_data.md), holding the committed ERVISS snapshots and the
                                hospitalisation indicators; at the top level slim_flu_iliplus.csv, the
                                RespiCompass, vaccination, contact and demography inputs
                                (+ data/external/ driver tables with provenance)
@@ -184,9 +184,9 @@ Where each kind of information lives:
 
 | File | Holds |
 |---|---|
-| `README.md` (repository root) | **the project on one page**: team, justification, data needs (each linked to its data folder), objectives, scope |
-| `code/README.md` (this file) | what the code does, quick start, the method framework, layout |
-| `data/README.md` and `data/<need>/README.md` | each data need: source, how it was retrieved, coverage, caveats |
+| `README_project.md` (repository root) | **the project on one page**: team, justification, data needs (each linked to its data folder), objectives, scope |
+| `code/README_code.md` (this file) | what the code does, quick start, the method framework, layout |
+| `data/README_data.md` and `data/<need>/README_<need>.md` | each data need: source, how it was retrieved, coverage, caveats |
 | `documentation/quickstart.md` | how to set up and run |
 | `documentation/data_overview.md` | what data is present (`data`, `models_in`, indicators) |
 | `documentation/documentation.Rmd` | the model maths / science (SIR, inference, contact matrix) |

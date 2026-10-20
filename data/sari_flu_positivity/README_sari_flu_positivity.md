@@ -1,6 +1,6 @@
 # SARI test positivity for influenza
 
-Data need from the [project one-pager](../../README.md#data-needs): *SARI test positivity for flu
+Data need from the [project one-pager](../../README_project.md#data-needs): *SARI test positivity for flu
 [season, country, week]*.
 
 **Source.** ERVISS (ECDC), file `SARITestsDetectionsPositivity.csv`. It holds weekly influenza tests,
@@ -60,13 +60,13 @@ winter week (weeks 40–20).
 
 SARI+ = SARI rate × influenza positivity / 100. It is built from merged ERVISS releases (2020-W40 to
 2026-W40, longer than this snapshot) in the
-[hospital indicators](../flu_hospitalisation_indicators/README.md) folder. There
+[hospital indicators](../flu_hospitalisation_indicators/README_flu_hospitalisation_indicators.md) folder. There
 [`erviss_flu_hospital_weekly.csv`](../flu_hospitalisation_indicators/erviss_flu_hospital_weekly.csv)
 has indicators `sari_flu_tests`, `sari_flu_detections` (also by subtype), `sari_flu_positivity` and
 `sari_plus`.
 
 ## Related
 
-- [SARI rates](../sari_rates/README.md): the other half of SARI+.
-- [Primary care test positivity](../primary_care_flu_positivity/README.md): the same measure among
+- [SARI rates](../sari_rates/README_sari_rates.md): the other half of SARI+.
+- [Primary care test positivity](../primary_care_flu_positivity/README_primary_care_flu_positivity.md): the same measure among
   primary-care patients.

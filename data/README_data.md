@@ -1,16 +1,16 @@
 # Data
 
-The [project one-pager](../README.md#data-needs) lists the project's data needs. Each need that has
+The [project one-pager](../README_project.md#data-needs) lists the project's data needs. Each need that has
 been worked on has a folder here, holding the data and a README that says where they come from, what
 they cover and how far to trust them.
 
 | Data need (one-pager) | Folder | Sources so far |
 |---|---|---|
-| Primary care ILI rates | [`primary_care_ili_rates/`](primary_care_ili_rates/README.md) | ERVISS only, merged across its releases from 2014/15 |
-| Primary care test positivity for flu | [`primary_care_flu_positivity/`](primary_care_flu_positivity/README.md) | ERVISS only, merged across its releases from 2014/15 |
-| SARI rates | [`sari_rates/`](sari_rates/README.md) | ERVISS only (merged from 2020-W40, its first SARI week, in the hospitalisation folder) |
-| SARI test positivity for flu | [`sari_flu_positivity/`](sari_flu_positivity/README.md) | ERVISS only (merged from 2020-W40, its first SARI week, in the hospitalisation folder) |
-| Diverse influenza hospitalisation indicators | [`flu_hospitalisation_indicators/`](flu_hospitalisation_indicators/README.md) | ERVISS, merged across releases, plus seven national sources from a wider search |
+| Primary care ILI rates | [`primary_care_ili_rates/`](primary_care_ili_rates/README_primary_care_ili_rates.md) | ERVISS only, merged across its releases from 2014/15 |
+| Primary care test positivity for flu | [`primary_care_flu_positivity/`](primary_care_flu_positivity/README_primary_care_flu_positivity.md) | ERVISS only, merged across its releases from 2014/15 |
+| SARI rates | [`sari_rates/`](sari_rates/README_sari_rates.md) | ERVISS only (merged from 2020-W40, its first SARI week, in the hospitalisation folder) |
+| SARI test positivity for flu | [`sari_flu_positivity/`](sari_flu_positivity/README_sari_flu_positivity.md) | ERVISS only (merged from 2020-W40, its first SARI week, in the hospitalisation folder) |
+| Diverse influenza hospitalisation indicators | [`flu_hospitalisation_indicators/`](flu_hospitalisation_indicators/README_flu_hospitalisation_indicators.md) | ERVISS, merged across releases, plus seven national sources from a wider search |
 | Dominant influenza subtype | not yet | an earlier analysis's table is in `external/` (below) |
 | Influenza vaccination coverage | not yet | RespiCompass and an external 65+ table (below) |
 
